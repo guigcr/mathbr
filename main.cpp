@@ -4,14 +4,42 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
+#include "mathbr/ols.hpp"
+#include "mathbr/regularized.hpp"
+#include "mathbr/wls.hpp"
+#include "mathbr/econometrics.hpp"
+#include "mathbr/time_series.hpp"
 
 namespace py = pybind11;
+
+namespace Validation {
+    void paired_size(size_t actual, size_t expected) {
+        if (actual != expected || expected == 0) {
+            throw std::invalid_argument("inputs must have the same nonzero length");
+        }
+    }
+
+    void training_data(const std::vector<std::vector<double>>& X, size_t y_size,
+                       size_t n_features, double lr, int epochs) {
+        paired_size(X.size(), y_size);
+        if (n_features == 0 || !std::isfinite(lr) || lr <= 0.0 || epochs <= 0) {
+            throw std::invalid_argument("n_features, lr and epochs must be positive (lr finite)");
+        }
+        for (const auto& row : X) {
+            if (row.size() != n_features) {
+                throw std::invalid_argument("each X row must match n_features");
+            }
+        }
+    }
+}
 
 // activation functions
 namespace Activations {
 
     double sigmoid(double z) {
-        return 1.0 / (1.0 + std::exp(-z));
+        if (z >= 0.0) return 1.0 / (1.0 + std::exp(-z));
+        const double e = std::exp(z);
+        return e / (1.0 + e);
     }
 
     double sigmoid_derivative(double z) {
@@ -46,12 +74,12 @@ namespace Activations {
 
     double gelu(double z) {
         // tanh approximation, same one used in BERT/GPT
-        const double c = std::sqrt(2.0 / M_PI);
+        const double c = std::sqrt(2.0 / 3.14159265358979323846);
         return 0.5 * z * (1.0 + std::tanh(c * (z + 0.044715 * std::pow(z, 3))));
     }
 
     double gelu_derivative(double z) {
-        const double c = std::sqrt(2.0 / M_PI);
+        const double c = std::sqrt(2.0 / 3.14159265358979323846);
         double inner = c * (z + 0.044715 * std::pow(z, 3));
         double t = std::tanh(inner);
         double dt_dz = c * (1.0 + 3.0 * 0.044715 * z * z);
@@ -69,6 +97,7 @@ namespace Activations {
     }
 
     std::vector<double> softmax(const std::vector<double>& z) {
+        if (z.empty()) throw std::invalid_argument("softmax requires a nonempty vector");
         std::vector<double> out(z.size());
         double max_val = *std::max_element(z.begin(), z.end());
         double sum = 0.0;
@@ -89,6 +118,7 @@ namespace Activations {
 namespace Losses {
 
     double mse(const std::vector<double>& y_true, const std::vector<double>& y_pred) {
+        Validation::paired_size(y_true.size(), y_pred.size());
         double total = 0.0;
         int n = y_true.size();
         for (int i = 0; i < n; i++) {
@@ -98,6 +128,7 @@ namespace Losses {
     }
 
     std::vector<double> mse_derivative(const std::vector<double>& y_true, const std::vector<double>& y_pred) {
+        Validation::paired_size(y_true.size(), y_pred.size());
         int n = y_true.size();
         std::vector<double> grad(n);
         for (int i = 0; i < n; i++) {
@@ -107,6 +138,7 @@ namespace Losses {
     }
 
     double mae(const std::vector<double>& y_true, const std::vector<double>& y_pred) {
+        Validation::paired_size(y_true.size(), y_pred.size());
         double total = 0.0;
         int n = y_true.size();
         for (int i = 0; i < n; i++) {
@@ -120,9 +152,16 @@ namespace Losses {
     }
 
     double logloss(const std::vector<int>& y_true, const std::vector<double>& y_pred) {
+        Validation::paired_size(y_true.size(), y_pred.size());
         double loss = 0.0;
         int n = y_true.size();
         for (int i = 0; i < n; i++) {
+            if (y_true[i] != 0 && y_true[i] != 1) {
+                throw std::invalid_argument("logloss labels must be 0 or 1");
+            }
+            if (!std::isfinite(y_pred[i]) || y_pred[i] < 0.0 || y_pred[i] > 1.0) {
+                throw std::invalid_argument("logloss probabilities must be finite and in [0, 1]");
+            }
             double p = std::clamp(y_pred[i], 1e-15, 1.0 - 1e-15);
             loss += y_true[i] * std::log(p) + (1 - y_true[i]) * std::log(1.0 - p);
         }
@@ -140,7 +179,9 @@ private:
     bool is_trained = false;
 
 public:
-    LinearRegression(int n_features) : w(n_features, 0.0), b(0.0) {}
+    LinearRegression(int n_features) : w(n_features > 0 ? n_features : 0, 0.0), b(0.0) {
+        if (n_features <= 0) throw std::invalid_argument("n_features must be positive");
+    }
 
     double predict(const std::vector<double>& x) const {
         if ((int)x.size() != (int)w.size()) {
@@ -164,6 +205,7 @@ public:
     // trains with gradient descent using MSE
     void fit(const std::vector<std::vector<double>>& X, const std::vector<double>& y,
               double lr = 0.01, int epochs = 1000) {
+        Validation::training_data(X, y.size(), w.size(), lr, epochs);
 
         int n = X.size();
         int n_features = w.size();
@@ -183,9 +225,9 @@ public:
             }
 
             for (int j = 0; j < n_features; j++) {
-                w[j] -= lr * grad_w[j] / n;
+                w[j] -= lr * grad_w[j];
             }
-            b -= lr * grad_b / n;
+            b -= lr * grad_b;
         }
         is_trained = true;
     }
@@ -204,7 +246,9 @@ private:
     bool is_trained = false;
 
 public:
-    LogisticRegression(int n_features) : w(n_features, 0.0), b(0.0) {}
+    LogisticRegression(int n_features) : w(n_features > 0 ? n_features : 0, 0.0), b(0.0) {
+        if (n_features <= 0) throw std::invalid_argument("n_features must be positive");
+    }
 
     double predict_proba(const std::vector<double>& x) const {
         if ((int)x.size() != (int)w.size()) {
@@ -218,6 +262,9 @@ public:
     }
 
     int predict(const std::vector<double>& x, double threshold = 0.5) const {
+        if (!std::isfinite(threshold) || threshold < 0.0 || threshold > 1.0) {
+            throw std::invalid_argument("threshold must be in [0, 1]");
+        }
         return predict_proba(x) >= threshold ? 1 : 0;
     }
 
@@ -233,6 +280,10 @@ public:
     // note: sigmoid + logloss gradient simplifies to (p - y)
     void fit(const std::vector<std::vector<double>>& X, const std::vector<int>& y,
               double lr = 0.01, int epochs = 1000) {
+        Validation::training_data(X, y.size(), w.size(), lr, epochs);
+        for (int label : y) {
+            if (label != 0 && label != 1) throw std::invalid_argument("labels must be 0 or 1");
+        }
 
         int n = X.size();
         int n_features = w.size();
@@ -266,8 +317,8 @@ public:
 
 
 PYBIND11_MODULE(mathbr, m) {
-    m.doc() = "ML math library - Version 2.0";
-    m.attr("version") = "0.3.0";
+    m.doc() = "Educational machine-learning math library";
+    m.attr("version") = "0.6.0";
 
     // activations
     py::module_ activations = m.def_submodule("activations", "Activation functions");
@@ -321,4 +372,95 @@ PYBIND11_MODULE(mathbr, m) {
         .def("__repr__", [](const LogisticRegression& r) {
             return "<LogisticRegression trained=" + std::string(r.trained() ? "True" : "False") + ">";
         });
+
+    py::class_<mathbr::OLS>(m, "OLS", "Ordinary least squares with an intercept and classical standard errors.")
+        .def(py::init<int>(), py::arg("n_features"))
+        .def("fit", &mathbr::OLS::fit, py::arg("X"), py::arg("y"),
+             "Fit by QR decomposition. Requires more observations than parameters and full column rank.")
+        .def("predict", &mathbr::OLS::predict, py::arg("x"))
+        .def("predict_batch", &mathbr::OLS::predict_batch, py::arg("X"))
+        .def("coefficients", &mathbr::OLS::coefficients, "Intercept first, followed by feature coefficients.")
+        .def("standard_errors", &mathbr::OLS::standard_errors,
+             "Classical OLS standard errors under homoscedastic, independent errors.")
+        .def("r_squared", &mathbr::OLS::r_squared)
+        .def("residual_variance", &mathbr::OLS::residual_variance)
+        .def("degrees_of_freedom", &mathbr::OLS::degrees_of_freedom)
+        .def("trained", &mathbr::OLS::trained);
+
+    py::class_<mathbr::WLS, mathbr::OLS>(m, "WLS", "Weighted least squares with positive inverse-variance weights.")
+        .def(py::init<int>(), py::arg("n_features"))
+        .def("fit", &mathbr::WLS::fit, py::arg("X"), py::arg("y"), py::arg("weights"),
+             "Fit weighted least squares. Weights must be positive and finite.");
+
+    py::class_<mathbr::RegularizedRegression>(m, "_RegularizedRegression")
+        .def("fit", &mathbr::RegularizedRegression::fit, py::arg("X"), py::arg("y"))
+        .def("predict", &mathbr::RegularizedRegression::predict, py::arg("x"))
+        .def("predict_batch", &mathbr::RegularizedRegression::predict_batch, py::arg("X"))
+        .def("coefficients", &mathbr::RegularizedRegression::coefficients)
+        .def("intercept", &mathbr::RegularizedRegression::intercept)
+        .def("iterations", &mathbr::RegularizedRegression::iterations)
+        .def("converged", &mathbr::RegularizedRegression::converged)
+        .def("trained", &mathbr::RegularizedRegression::trained);
+    py::class_<mathbr::Ridge, mathbr::RegularizedRegression>(m, "Ridge")
+        .def(py::init<int, double, int, double>(), py::arg("n_features"), py::arg("alpha") = 1.0,
+             py::arg("max_iter") = 1000, py::arg("tol") = 1e-8);
+    py::class_<mathbr::Lasso, mathbr::RegularizedRegression>(m, "Lasso")
+        .def(py::init<int, double, int, double>(), py::arg("n_features"), py::arg("alpha") = 1.0,
+             py::arg("max_iter") = 1000, py::arg("tol") = 1e-8);
+    py::class_<mathbr::ElasticNet, mathbr::RegularizedRegression>(m, "ElasticNet")
+        .def(py::init<int, double, double, int, double>(), py::arg("n_features"),
+             py::arg("alpha") = 1.0, py::arg("l1_ratio") = 0.5,
+             py::arg("max_iter") = 1000, py::arg("tol") = 1e-8);
+
+    py::class_<mathbr::IV2SLS>(m, "IV2SLS", "Two-stage least squares with excluded instruments.")
+        .def(py::init<int, int, int>(), py::arg("n_exog"), py::arg("n_endog"), py::arg("n_instruments"))
+        .def("fit", &mathbr::IV2SLS::fit, py::arg("exog"), py::arg("endog"),
+             py::arg("instruments"), py::arg("y"))
+        .def("predict", &mathbr::IV2SLS::predict, py::arg("exog"), py::arg("endog"))
+        .def("coefficients", &mathbr::IV2SLS::coefficients,
+             "Intercept, exogenous coefficients, then endogenous coefficients.")
+        .def("first_stage_r_squared", &mathbr::IV2SLS::first_stage_r_squared,
+             "Overall first-stage R-squared for each endogenous regressor; not a weak-instrument test.")
+        .def("trained", &mathbr::IV2SLS::trained);
+
+    py::class_<mathbr::FixedEffects>(m, "FixedEffects", "Entity fixed-effects panel regression.")
+        .def(py::init<int>(), py::arg("n_features"))
+        .def("fit", &mathbr::FixedEffects::fit, py::arg("X"), py::arg("y"), py::arg("entity_ids"))
+        .def("predict", &mathbr::FixedEffects::predict, py::arg("x"), py::arg("entity_id"))
+        .def("coefficients", &mathbr::FixedEffects::coefficients, "Within-entity slopes.")
+        .def("entity_intercept", &mathbr::FixedEffects::entity_intercept, py::arg("entity_id"))
+        .def("within_r_squared", &mathbr::FixedEffects::within_r_squared)
+        .def("trained", &mathbr::FixedEffects::trained);
+
+    py::class_<mathbr::VAR>(m, "VAR", "Vector autoregression with an intercept.")
+        .def(py::init<int, int>(), py::arg("n_series"), py::arg("lags"))
+        .def("fit", &mathbr::VAR::fit, py::arg("observations"))
+        .def("coefficients", &mathbr::VAR::coefficients,
+             "One row per equation: intercept, then lag-1 series, lag-2 series, etc.")
+        .def("forecast", &mathbr::VAR::forecast, py::arg("steps"))
+        .def("residual_covariance", &mathbr::VAR::residual_covariance)
+        .def("trained", &mathbr::VAR::trained);
+
+    py::class_<mathbr::AR>(m, "AR", "Univariate autoregression with an intercept.")
+        .def(py::init<int>(), py::arg("lags"))
+        .def("fit", &mathbr::AR::fit, py::arg("observations"))
+        .def("coefficients", &mathbr::AR::coefficients)
+        .def("forecast", &mathbr::AR::forecast, py::arg("steps"))
+        .def("trained", &mathbr::AR::trained);
+
+    py::class_<mathbr::GARCH>(m, "GARCH", "Gaussian quasi-maximum-likelihood GARCH(1,1) with constant mean.")
+        .def(py::init<int, double, bool>(), py::arg("max_iter") = 2000,
+             py::arg("tol") = 1e-7, py::arg("arch_only") = false)
+        .def("fit", &mathbr::GARCH::fit, py::arg("observations"))
+        .def("mean", &mathbr::GARCH::mean)
+        .def("omega", &mathbr::GARCH::omega)
+        .def("alpha", &mathbr::GARCH::alpha)
+        .def("beta", &mathbr::GARCH::beta)
+        .def("log_likelihood", &mathbr::GARCH::log_likelihood)
+        .def("conditional_variance", &mathbr::GARCH::conditional_variance)
+        .def("forecast_variance", &mathbr::GARCH::forecast_variance, py::arg("steps"))
+        .def("converged", &mathbr::GARCH::converged)
+        .def("trained", &mathbr::GARCH::trained);
+    py::class_<mathbr::ARCH, mathbr::GARCH>(m, "ARCH", "Gaussian ARCH(1) with constant mean.")
+        .def(py::init<int, double>(), py::arg("max_iter") = 2000, py::arg("tol") = 1e-7);
 }
