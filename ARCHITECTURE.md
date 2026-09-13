@@ -24,7 +24,7 @@ main.cpp                 pybind11 module, activations, losses, GD models
        C++ standard library
 ```
 
-`setup.py` declares the C++ extension and `pyproject.toml` provides build metadata and isolated build dependencies. `tests/` contains pytest checks for numerical results and invalid inputs. `README.md` documents installation and public usage.
+`setup.py` declares the C++ extension and `pyproject.toml` provides build metadata and isolated build dependencies. `tests/` contains pytest checks for numerical results and invalid inputs. `README.md` provides a short overview; `PROJECT.md` documents the public API, examples, and model assumptions.
 
 The Python module is named `mathbr`. Activation and loss functions live under `mathbr.activations` and `mathbr.losses`. Models are top-level classes. pybind11 converts Python sequences to `std::vector`, so calls involving arrays currently copy data. No NumPy, Eigen, BLAS, or external statistical-distribution dependency is required.
 

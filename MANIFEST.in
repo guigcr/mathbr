@@ -2,3 +2,4 @@ include main.cpp
 recursive-include include *.hpp
 recursive-include src *.cpp
 include ARCHITECTURE.md
+include PROJECT.md
