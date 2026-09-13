@@ -14,7 +14,12 @@ public:
     std::vector<double> predict_batch(const std::vector<std::vector<double>>& X) const;
     std::vector<double> coefficients() const;
     std::vector<double> standard_errors() const;
+    std::vector<double> t_statistics() const;
+    std::vector<double> p_values() const;
+    std::vector<std::vector<double>> confidence_intervals(double level = 0.95) const;
     double r_squared() const;
+    double adjusted_r_squared() const;
+    double f_statistic() const;
     double residual_variance() const;
     int degrees_of_freedom() const;
     bool trained() const noexcept;

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mathbr"
 version = "0.6.0"
-description = "Educational machine-learning building blocks in C++ with Python bindings"
+description = "Educational C++17 statistics library for Python, built with pybind11"
 readme = "README.md"
 requires-python = ">=3.9"
 

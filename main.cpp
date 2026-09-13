@@ -9,6 +9,15 @@
 #include "mathbr/wls.hpp"
 #include "mathbr/econometrics.hpp"
 #include "mathbr/time_series.hpp"
+#include "mathbr/distributions.hpp"
+#include "mathbr/statistics.hpp"
+#include "mathbr/hypothesis.hpp"
+#include "mathbr/evaluation.hpp"
+#include "mathbr/diagnostics.hpp"
+#include "mathbr/nonparametric.hpp"
+#include "mathbr/time_series_diagnostics.hpp"
+#include "mathbr/survival.hpp"
+#include "mathbr/bayesian.hpp"
 
 namespace py = pybind11;
 
@@ -209,19 +218,21 @@ public:
 
         int n = X.size();
         int n_features = w.size();
+        const double scale = 2.0 / n;
+        std::vector<double> grad_w(n_features);
 
         for (int epoch = 0; epoch < epochs; epoch++) {
-            std::vector<double> y_pred = predict_batch(X);
-            std::vector<double> output_grad = Losses::mse_derivative(y, y_pred);
-
-            std::vector<double> grad_w(n_features, 0.0);
+            std::fill(grad_w.begin(), grad_w.end(), 0.0);
             double grad_b = 0.0;
 
             for (int i = 0; i < n; i++) {
+                double prediction = b;
+                for (int j = 0; j < n_features; j++) prediction += X[i][j] * w[j];
+                const double error = (prediction - y[i]) * scale;
                 for (int j = 0; j < n_features; j++) {
-                    grad_w[j] += output_grad[i] * X[i][j];
+                    grad_w[j] += error * X[i][j];
                 }
-                grad_b += output_grad[i];
+                grad_b += error;
             }
 
             for (int j = 0; j < n_features; j++) {
@@ -287,15 +298,17 @@ public:
 
         int n = X.size();
         int n_features = w.size();
+        const double scale = 1.0 / n;
+        std::vector<double> grad_w(n_features);
 
         for (int epoch = 0; epoch < epochs; epoch++) {
-            std::vector<double> y_pred = predict_proba_batch(X);
-
-            std::vector<double> grad_w(n_features, 0.0);
+            std::fill(grad_w.begin(), grad_w.end(), 0.0);
             double grad_b = 0.0;
 
             for (int i = 0; i < n; i++) {
-                double error = y_pred[i] - y[i];
+                double score = b;
+                for (int j = 0; j < n_features; j++) score += X[i][j] * w[j];
+                const double error = Activations::sigmoid(score) - y[i];
                 for (int j = 0; j < n_features; j++) {
                     grad_w[j] += error * X[i][j];
                 }
@@ -303,9 +316,9 @@ public:
             }
 
             for (int j = 0; j < n_features; j++) {
-                w[j] -= lr * grad_w[j] / n;
+                w[j] -= lr * grad_w[j] * scale;
             }
-            b -= lr * grad_b / n;
+            b -= lr * grad_b * scale;
         }
         is_trained = true;
     }
@@ -319,6 +332,274 @@ public:
 PYBIND11_MODULE(mathbr, m) {
     m.doc() = "Educational machine-learning math library";
     m.attr("version") = "0.6.0";
+
+    py::module_ distributions = m.def_submodule("distributions", "Probability distributions");
+    distributions.def("normal_pdf", &mathbr::distributions::normal_pdf, py::arg("x"));
+    distributions.def("normal_logpdf", &mathbr::distributions::normal_logpdf, py::arg("x"));
+    distributions.def("normal_cdf", &mathbr::distributions::normal_cdf, py::arg("x"));
+    distributions.def("normal_logcdf", &mathbr::distributions::normal_logcdf, py::arg("x"));
+    distributions.def("normal_ppf", &mathbr::distributions::normal_ppf, py::arg("p"));
+    distributions.def("student_t_pdf", &mathbr::distributions::student_t_pdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("student_t_logpdf", &mathbr::distributions::student_t_logpdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("student_t_cdf", &mathbr::distributions::student_t_cdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("student_t_logcdf", &mathbr::distributions::student_t_logcdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("student_t_ppf", &mathbr::distributions::student_t_ppf,
+                      py::arg("p"), py::arg("df"));
+    distributions.def("chi_square_pdf", &mathbr::distributions::chi_square_pdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("chi_square_logpdf", &mathbr::distributions::chi_square_logpdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("chi_square_cdf", &mathbr::distributions::chi_square_cdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("chi_square_logcdf", &mathbr::distributions::chi_square_logcdf,
+                      py::arg("x"), py::arg("df"));
+    distributions.def("chi_square_ppf", &mathbr::distributions::chi_square_ppf,
+                      py::arg("p"), py::arg("df"));
+    distributions.def("f_pdf", &mathbr::distributions::f_pdf,
+                      py::arg("x"), py::arg("df1"), py::arg("df2"));
+    distributions.def("f_logpdf", &mathbr::distributions::f_logpdf,
+                      py::arg("x"), py::arg("df1"), py::arg("df2"));
+    distributions.def("f_cdf", &mathbr::distributions::f_cdf,
+                      py::arg("x"), py::arg("df1"), py::arg("df2"));
+    distributions.def("f_logcdf", &mathbr::distributions::f_logcdf,
+                      py::arg("x"), py::arg("df1"), py::arg("df2"));
+    distributions.def("f_ppf", &mathbr::distributions::f_ppf,
+                      py::arg("p"), py::arg("df1"), py::arg("df2"));
+    distributions.def("uniform_pdf", &mathbr::distributions::uniform_pdf,
+                      py::arg("x"), py::arg("a"), py::arg("b"));
+    distributions.def("uniform_logpdf", &mathbr::distributions::uniform_logpdf,
+                      py::arg("x"), py::arg("a"), py::arg("b"));
+    distributions.def("uniform_cdf", &mathbr::distributions::uniform_cdf,
+                      py::arg("x"), py::arg("a"), py::arg("b"));
+    distributions.def("uniform_logcdf", &mathbr::distributions::uniform_logcdf,
+                      py::arg("x"), py::arg("a"), py::arg("b"));
+    distributions.def("uniform_ppf", &mathbr::distributions::uniform_ppf,
+                      py::arg("p"), py::arg("a"), py::arg("b"));
+    distributions.def("bernoulli_pmf", &mathbr::distributions::bernoulli_pmf,
+                      py::arg("k"), py::arg("p"));
+    distributions.def("bernoulli_cdf", &mathbr::distributions::bernoulli_cdf,
+                      py::arg("k"), py::arg("p"));
+    distributions.def("binomial_pmf", &mathbr::distributions::binomial_pmf,
+                      py::arg("k"), py::arg("n"), py::arg("p"));
+    distributions.def("binomial_cdf", &mathbr::distributions::binomial_cdf,
+                      py::arg("k"), py::arg("n"), py::arg("p"));
+    distributions.def("exponential_pdf", &mathbr::distributions::exponential_pdf,
+                      py::arg("x"), py::arg("rate"));
+    distributions.def("exponential_cdf", &mathbr::distributions::exponential_cdf,
+                      py::arg("x"), py::arg("rate"));
+    distributions.def("exponential_ppf", &mathbr::distributions::exponential_ppf,
+                      py::arg("p"), py::arg("rate"));
+    distributions.def("weibull_pdf", &mathbr::distributions::weibull_pdf,
+                      py::arg("x"), py::arg("shape"), py::arg("scale"));
+    distributions.def("weibull_cdf", &mathbr::distributions::weibull_cdf,
+                      py::arg("x"), py::arg("shape"), py::arg("scale"));
+    distributions.def("weibull_ppf", &mathbr::distributions::weibull_ppf,
+                      py::arg("p"), py::arg("shape"), py::arg("scale"));
+    distributions.def("laplace_pdf", &mathbr::distributions::laplace_pdf,
+                      py::arg("x"), py::arg("location"), py::arg("scale"));
+    distributions.def("laplace_cdf", &mathbr::distributions::laplace_cdf,
+                      py::arg("x"), py::arg("location"), py::arg("scale"));
+    distributions.def("laplace_ppf", &mathbr::distributions::laplace_ppf,
+                      py::arg("p"), py::arg("location"), py::arg("scale"));
+    distributions.def("cauchy_pdf", &mathbr::distributions::cauchy_pdf,
+                      py::arg("x"), py::arg("location"), py::arg("scale"));
+    distributions.def("cauchy_cdf", &mathbr::distributions::cauchy_cdf,
+                      py::arg("x"), py::arg("location"), py::arg("scale"));
+    distributions.def("cauchy_ppf", &mathbr::distributions::cauchy_ppf,
+                      py::arg("p"), py::arg("location"), py::arg("scale"));
+    distributions.def("lognormal_pdf", &mathbr::distributions::lognormal_pdf,
+                      py::arg("x"), py::arg("mu"), py::arg("sigma"));
+    distributions.def("lognormal_cdf", &mathbr::distributions::lognormal_cdf,
+                      py::arg("x"), py::arg("mu"), py::arg("sigma"));
+    distributions.def("lognormal_ppf", &mathbr::distributions::lognormal_ppf,
+                      py::arg("p"), py::arg("mu"), py::arg("sigma"));
+    distributions.def("gamma_pdf", &mathbr::distributions::gamma_pdf,
+                      py::arg("x"), py::arg("shape"), py::arg("scale"));
+    distributions.def("gamma_cdf", &mathbr::distributions::gamma_cdf,
+                      py::arg("x"), py::arg("shape"), py::arg("scale"));
+    distributions.def("gamma_ppf", &mathbr::distributions::gamma_ppf,
+                      py::arg("p"), py::arg("shape"), py::arg("scale"));
+    distributions.def("beta_pdf", &mathbr::distributions::beta_pdf,
+                      py::arg("x"), py::arg("alpha"), py::arg("beta"));
+    distributions.def("beta_cdf", &mathbr::distributions::beta_cdf,
+                      py::arg("x"), py::arg("alpha"), py::arg("beta"));
+    distributions.def("beta_ppf", &mathbr::distributions::beta_ppf,
+                      py::arg("p"), py::arg("alpha"), py::arg("beta"));
+
+    py::module_ statistics = m.def_submodule("statistics", "Descriptive statistics");
+    statistics.def("mean", &mathbr::statistics::mean, py::arg("x"));
+    statistics.def("median", &mathbr::statistics::median, py::arg("x"));
+    statistics.def("mode", &mathbr::statistics::mode, py::arg("x"));
+    statistics.def("variance", &mathbr::statistics::variance,
+                   py::arg("x"), py::arg("ddof") = 1);
+    statistics.def("standard_deviation", &mathbr::statistics::standard_deviation,
+                   py::arg("x"), py::arg("ddof") = 1);
+    statistics.def("skewness", &mathbr::statistics::skewness, py::arg("x"));
+    statistics.def("excess_kurtosis", &mathbr::statistics::excess_kurtosis, py::arg("x"));
+    statistics.def("quantile", &mathbr::statistics::quantile,
+                   py::arg("x"), py::arg("p"));
+    statistics.def("percentile", &mathbr::statistics::percentile,
+                   py::arg("x"), py::arg("p"));
+    statistics.def("interquartile_range", &mathbr::statistics::interquartile_range, py::arg("x"));
+    statistics.def("five_number_summary", &mathbr::statistics::five_number_summary, py::arg("x"));
+    statistics.def("covariance", &mathbr::statistics::covariance,
+                   py::arg("x"), py::arg("y"), py::arg("ddof") = 1);
+    statistics.def("pearson_correlation", &mathbr::statistics::pearson_correlation,
+                   py::arg("x"), py::arg("y"));
+    statistics.def("spearman_correlation", &mathbr::statistics::spearman_correlation,
+                   py::arg("x"), py::arg("y"));
+    statistics.def("weighted_mean", &mathbr::statistics::weighted_mean,
+                   py::arg("x"), py::arg("weights"));
+    statistics.def("weighted_variance", &mathbr::statistics::weighted_variance,
+                   py::arg("x"), py::arg("weights"));
+    statistics.def("weighted_covariance", &mathbr::statistics::weighted_covariance,
+                   py::arg("x"), py::arg("y"), py::arg("weights"));
+    statistics.def("weighted_correlation", &mathbr::statistics::weighted_correlation,
+                   py::arg("x"), py::arg("y"), py::arg("weights"));
+    statistics.def("weighted_quantile", &mathbr::statistics::weighted_quantile,
+                   py::arg("x"), py::arg("weights"), py::arg("p"));
+    statistics.def("log_sum_exp", &mathbr::statistics::log_sum_exp, py::arg("x"));
+
+    py::module_ hypothesis = m.def_submodule("hypothesis", "Classical hypothesis tests");
+    py::class_<mathbr::hypothesis::TTestResult>(hypothesis, "TTestResult")
+        .def_readonly("statistic", &mathbr::hypothesis::TTestResult::statistic)
+        .def_readonly("degrees_of_freedom", &mathbr::hypothesis::TTestResult::degrees_of_freedom)
+        .def_readonly("p_value", &mathbr::hypothesis::TTestResult::p_value);
+    py::class_<mathbr::hypothesis::ZTestResult>(hypothesis, "ZTestResult")
+        .def_readonly("statistic", &mathbr::hypothesis::ZTestResult::statistic)
+        .def_readonly("p_value", &mathbr::hypothesis::ZTestResult::p_value);
+    py::class_<mathbr::hypothesis::ChiSquareTestResult>(hypothesis, "ChiSquareTestResult")
+        .def_readonly("statistic", &mathbr::hypothesis::ChiSquareTestResult::statistic)
+        .def_readonly("degrees_of_freedom",
+                      &mathbr::hypothesis::ChiSquareTestResult::degrees_of_freedom)
+        .def_readonly("p_value", &mathbr::hypothesis::ChiSquareTestResult::p_value);
+    hypothesis.def("one_sample_t_test", &mathbr::hypothesis::one_sample_t_test,
+                   py::arg("x"), py::arg("null_mean") = 0.0);
+    hypothesis.def("paired_t_test", &mathbr::hypothesis::paired_t_test,
+                   py::arg("before"), py::arg("after"));
+    hypothesis.def("welch_t_test", &mathbr::hypothesis::welch_t_test,
+                   py::arg("x"), py::arg("y"));
+    hypothesis.def("bonferroni_correction", &mathbr::hypothesis::bonferroni_correction,
+                   py::arg("p_values"));
+    hypothesis.def("holm_correction", &mathbr::hypothesis::holm_correction,
+                   py::arg("p_values"));
+    hypothesis.def("benjamini_hochberg_correction",
+                   &mathbr::hypothesis::benjamini_hochberg_correction,
+                   py::arg("p_values"));
+    hypothesis.def("proportion_z_test", &mathbr::hypothesis::proportion_z_test,
+                   py::arg("successes"), py::arg("trials"), py::arg("null_p"));
+    hypothesis.def("chi_square_goodness_of_fit",
+                   &mathbr::hypothesis::chi_square_goodness_of_fit,
+                   py::arg("observed"), py::arg("expected"));
+
+    py::module_ evaluation = m.def_submodule("evaluation", "Binary classification evaluation");
+    py::class_<mathbr::evaluation::RocCurve>(evaluation, "RocCurve")
+        .def_readonly("fpr", &mathbr::evaluation::RocCurve::fpr)
+        .def_readonly("tpr", &mathbr::evaluation::RocCurve::tpr)
+        .def_readonly("thresholds", &mathbr::evaluation::RocCurve::thresholds);
+    py::class_<mathbr::evaluation::PrecisionRecallCurve>(evaluation, "PrecisionRecallCurve")
+        .def_readonly("precision", &mathbr::evaluation::PrecisionRecallCurve::precision)
+        .def_readonly("recall", &mathbr::evaluation::PrecisionRecallCurve::recall)
+        .def_readonly("thresholds", &mathbr::evaluation::PrecisionRecallCurve::thresholds);
+    py::class_<mathbr::evaluation::CalibrationCurve>(evaluation, "CalibrationCurve")
+        .def_readonly("mean_predicted", &mathbr::evaluation::CalibrationCurve::mean_predicted)
+        .def_readonly("fraction_positive", &mathbr::evaluation::CalibrationCurve::fraction_positive)
+        .def_readonly("counts", &mathbr::evaluation::CalibrationCurve::counts);
+    evaluation.def("confusion_matrix", &mathbr::evaluation::confusion_matrix,
+                   py::arg("y_true"), py::arg("y_pred"));
+    evaluation.def("precision", &mathbr::evaluation::precision,
+                   py::arg("y_true"), py::arg("y_pred"));
+    evaluation.def("recall", &mathbr::evaluation::recall,
+                   py::arg("y_true"), py::arg("y_pred"));
+    evaluation.def("f1_score", &mathbr::evaluation::f1_score,
+                   py::arg("y_true"), py::arg("y_pred"));
+    evaluation.def("roc_curve", &mathbr::evaluation::roc_curve,
+                   py::arg("y_true"), py::arg("scores"));
+    evaluation.def("roc_auc", &mathbr::evaluation::roc_auc,
+                   py::arg("y_true"), py::arg("scores"));
+    evaluation.def("precision_recall_curve", &mathbr::evaluation::precision_recall_curve,
+                   py::arg("y_true"), py::arg("scores"));
+    evaluation.def("rmse", &mathbr::evaluation::rmse, py::arg("y_true"), py::arg("y_pred"));
+    evaluation.def("mae", &mathbr::evaluation::mae, py::arg("y_true"), py::arg("y_pred"));
+    evaluation.def("mape", &mathbr::evaluation::mape, py::arg("y_true"), py::arg("y_pred"));
+    evaluation.def("log_loss", &mathbr::evaluation::log_loss,
+                   py::arg("y_true"), py::arg("probabilities"));
+    evaluation.def("k_fold_indices", &mathbr::evaluation::k_fold_indices,
+                   py::arg("n_samples"), py::arg("n_splits"), py::arg("seed") = 0);
+    evaluation.def("calibration_curve", &mathbr::evaluation::calibration_curve,
+                   py::arg("y_true"), py::arg("probabilities"), py::arg("n_bins") = 10);
+
+    py::module_ diagnostics = m.def_submodule("diagnostics", "Regression diagnostics and information criteria");
+    diagnostics.def("aic", &mathbr::diagnostics::aic,
+                    py::arg("log_likelihood"), py::arg("n_parameters"));
+    diagnostics.def("bic", &mathbr::diagnostics::bic,
+                    py::arg("log_likelihood"), py::arg("n_parameters"), py::arg("n_observations"));
+    diagnostics.def("hqic", &mathbr::diagnostics::hqic,
+                    py::arg("log_likelihood"), py::arg("n_parameters"), py::arg("n_observations"));
+    diagnostics.def("residual_standard_error", &mathbr::diagnostics::residual_standard_error,
+                    py::arg("residuals"), py::arg("n_parameters"));
+    diagnostics.def("durbin_watson", &mathbr::diagnostics::durbin_watson,
+                    py::arg("residuals"));
+    diagnostics.def("jarque_bera_statistic", &mathbr::diagnostics::jarque_bera_statistic,
+                    py::arg("residuals"));
+    diagnostics.def("jarque_bera_p_value", &mathbr::diagnostics::jarque_bera_p_value,
+                    py::arg("residuals"));
+
+    py::module_ nonparametric = m.def_submodule("nonparametric", "Nonparametric estimation");
+    nonparametric.def("empirical_cdf", &mathbr::nonparametric::empirical_cdf,
+                      py::arg("sample"), py::arg("points"));
+    nonparametric.def("gaussian_kde", &mathbr::nonparametric::gaussian_kde,
+                      py::arg("sample"), py::arg("points"), py::arg("bandwidth"));
+    nonparametric.def("nadaraya_watson", &mathbr::nonparametric::nadaraya_watson,
+                      py::arg("x"), py::arg("y"), py::arg("points"), py::arg("bandwidth"));
+
+    py::module_ time_series_diagnostics = m.def_submodule("time_series_diagnostics", "Time-series diagnostics");
+    py::class_<mathbr::time_series_diagnostics::LjungBoxResult>(time_series_diagnostics, "LjungBoxResult")
+        .def_readonly("statistic", &mathbr::time_series_diagnostics::LjungBoxResult::statistic)
+        .def_readonly("p_value", &mathbr::time_series_diagnostics::LjungBoxResult::p_value)
+        .def_readonly("lags", &mathbr::time_series_diagnostics::LjungBoxResult::lags);
+    time_series_diagnostics.def("acf", &mathbr::time_series_diagnostics::acf,
+                                py::arg("x"), py::arg("max_lag"));
+    time_series_diagnostics.def("pacf", &mathbr::time_series_diagnostics::pacf,
+                                py::arg("x"), py::arg("max_lag"));
+    time_series_diagnostics.def("ljung_box", &mathbr::time_series_diagnostics::ljung_box,
+                                py::arg("x"), py::arg("lags"));
+
+    py::module_ survival = m.def_submodule("survival", "Right-censored survival analysis");
+    py::class_<mathbr::survival::KaplanMeierResult>(survival, "KaplanMeierResult")
+        .def_readonly("times", &mathbr::survival::KaplanMeierResult::times)
+        .def_readonly("survival", &mathbr::survival::KaplanMeierResult::survival)
+        .def_readonly("at_risk", &mathbr::survival::KaplanMeierResult::at_risk)
+        .def_readonly("events", &mathbr::survival::KaplanMeierResult::events);
+    py::class_<mathbr::survival::LogRankResult>(survival, "LogRankResult")
+        .def_readonly("statistic", &mathbr::survival::LogRankResult::statistic)
+        .def_readonly("p_value", &mathbr::survival::LogRankResult::p_value);
+    survival.def("kaplan_meier", &mathbr::survival::kaplan_meier,
+                 py::arg("times"), py::arg("events"));
+    survival.def("log_rank_test", &mathbr::survival::log_rank_test,
+                 py::arg("times"), py::arg("events"), py::arg("groups"));
+
+    py::module_ bayesian = m.def_submodule("bayesian", "Conjugate Bayesian updating");
+    py::class_<mathbr::bayesian::BetaPosterior>(bayesian, "BetaPosterior")
+        .def_readonly("alpha", &mathbr::bayesian::BetaPosterior::alpha)
+        .def_readonly("beta", &mathbr::bayesian::BetaPosterior::beta)
+        .def("mean", &mathbr::bayesian::BetaPosterior::mean)
+        .def("credible_interval", &mathbr::bayesian::BetaPosterior::credible_interval,
+             py::arg("level") = 0.95);
+    py::class_<mathbr::bayesian::NormalPosterior>(bayesian, "NormalPosterior")
+        .def_readonly("mean", &mathbr::bayesian::NormalPosterior::mean)
+        .def_readonly("standard_deviation", &mathbr::bayesian::NormalPosterior::standard_deviation)
+        .def("credible_interval", &mathbr::bayesian::NormalPosterior::credible_interval,
+             py::arg("level") = 0.95);
+    bayesian.def("beta_binomial_update", &mathbr::bayesian::beta_binomial_update,
+                 py::arg("alpha"), py::arg("beta"), py::arg("successes"), py::arg("trials"));
+    bayesian.def("normal_normal_update", &mathbr::bayesian::normal_normal_update,
+                 py::arg("prior_mean"), py::arg("prior_sd"),
+                 py::arg("observation_sd"), py::arg("observations"));
 
     // activations
     py::module_ activations = m.def_submodule("activations", "Activation functions");
@@ -382,7 +663,13 @@ PYBIND11_MODULE(mathbr, m) {
         .def("coefficients", &mathbr::OLS::coefficients, "Intercept first, followed by feature coefficients.")
         .def("standard_errors", &mathbr::OLS::standard_errors,
              "Classical OLS standard errors under homoscedastic, independent errors.")
+        .def("t_statistics", &mathbr::OLS::t_statistics)
+        .def("p_values", &mathbr::OLS::p_values)
+        .def("confidence_intervals", &mathbr::OLS::confidence_intervals,
+             py::arg("level") = 0.95)
         .def("r_squared", &mathbr::OLS::r_squared)
+        .def("adjusted_r_squared", &mathbr::OLS::adjusted_r_squared)
+        .def("f_statistic", &mathbr::OLS::f_statistic)
         .def("residual_variance", &mathbr::OLS::residual_variance)
         .def("degrees_of_freedom", &mathbr::OLS::degrees_of_freedom)
         .def("trained", &mathbr::OLS::trained);

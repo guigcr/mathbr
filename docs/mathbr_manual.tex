@@ -1,0 +1,765 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[margin=25mm]{geometry}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+\title{mathbr: Python User Manual}
+\author{mathbr project}
+\date{Version 0.6.0}
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Getting started}
+\texttt{mathbr} is an educational C++17 extension exposed to Python through pybind11. It provides numerical functions and small statistical models. Install it with a C++17 compiler available:
+\begin{verbatim}
+python -m pip install .
+\end{verbatim}
+For development, run \verb|python -m pip install -e .| and \verb|python -m pytest|. Import the single top-level module:
+\begin{verbatim}
+import mathbr
+print(mathbr.version)
+\end{verbatim}
+Model classes are at the top level. Numerical functions live in submodules for activations, losses, descriptive statistics, nonparametric estimation, hypothesis tests, evaluation, distributions, regression diagnostics, time-series diagnostics, survival analysis, and Bayesian updating. A feature matrix \verb|X| is a list of rows; \verb|X[i]| contains the features of observation \verb|i|. A target vector \verb|y| has one entry per row. List inputs are copied into C++; there is no NumPy buffer interface yet. Wrong dimensions and invalid numeric values usually raise \verb|ValueError|. Accessing fitted results before \verb|fit()| raises \verb|RuntimeError|. Python may raise \verb|TypeError| when an argument cannot be converted to its declared type.
+
+\subsection{Choose a starting point}
+For a single data vector, begin with the descriptive-statistics section. For a known probability model, use the distributions section to calculate probabilities or cutoffs. For a fitted relationship, choose a model class, call \verb|fit|, and inspect predictions or coefficients. Use evaluation functions on observations held out from fitting to measure predictive performance. Use hypothesis tests or model inference only after checking the assumptions described beside each method. The worked examples near the end combine several parts of the library.
+
+Inputs are ordinary Python lists. For example, \verb|[[1.0], [2.0]]| represents two observations of one feature, while \verb|[1.0, 2.0]| represents one feature vector for a single prediction. Probabilities use a scale from zero to one; percentages use zero to one hundred only where an argument explicitly says \verb|percentile|. A returned p-value is a tail probability under a statistical null model. It is not the probability that the null model is true.
+
+\section{Activation functions}
+Every scalar activation takes \verb|z|, a numeric scalar, and returns a float. The corresponding derivative returns the derivative with respect to \verb|z|. These functions do not generally reject non-finite input.
+\begin{verbatim}
+mathbr.activations.sigmoid(z)                  # 1 / (1 + exp(-z))
+mathbr.activations.sigmoid_derivative(z)
+mathbr.activations.tanh_activation(z)          # tanh(z)
+mathbr.activations.tanh_derivative(z)
+mathbr.activations.relu(z)                     # max(0, z)
+mathbr.activations.relu_derivative(z)          # zero at z = 0
+mathbr.activations.leaky_relu(z, alpha=0.01)
+mathbr.activations.leaky_relu_derivative(z, alpha=0.01)
+mathbr.activations.gelu(z)                     # tanh approximation
+mathbr.activations.gelu_derivative(z)
+mathbr.activations.swish(z)                    # z * sigmoid(z)
+mathbr.activations.swish_derivative(z)
+mathbr.activations.softmax(z)                  # list of probabilities
+\end{verbatim}
+For leaky ReLU, \verb|alpha| is the negative-side slope and is not range-checked. \verb|softmax| accepts a nonempty sequence of numbers, subtracts its maximum for numerical stability, and returns one probability per input. An empty sequence raises \verb|ValueError|.
+\begin{verbatim}
+import mathbr
+print(mathbr.activations.sigmoid(0.0))
+print(mathbr.activations.softmax([1.0, 2.0, 3.0]))
+\end{verbatim}
+
+\section{Loss functions}
+The two inputs must be nonempty sequences of equal length; otherwise these functions raise \verb|ValueError|. They return a scalar float except for \verb|mse_derivative|, which returns one derivative per prediction. The general losses do not explicitly check every input for finiteness.
+\begin{verbatim}
+mathbr.losses.mse(y_true, y_pred)            # mean squared error
+mathbr.losses.mse_derivative(y_true, y_pred) # d(MSE)/d(y_pred)
+mathbr.losses.mae(y_true, y_pred)            # mean absolute error
+mathbr.losses.rmse(y_true, y_pred)           # root mean squared error
+mathbr.losses.logloss(y_true, y_pred)        # binary log loss
+\end{verbatim}
+For \verb|logloss|, labels must be integer 0 or 1 and predictions must be finite probabilities in $[0,1]$; violations raise \verb|ValueError|. The logarithm clips probabilities internally to avoid taking \verb|log(0)|. These are loss calculations, not cross-validation tools.
+\begin{verbatim}
+import mathbr
+print(mathbr.losses.mse([1.0, 2.0], [1.5, 1.5]))
+print(mathbr.losses.logloss([0, 1], [0.1, 0.9]))
+\end{verbatim}
+
+\section{Descriptive statistics}
+The \verb|mathbr.statistics| submodule summarizes finite, nonempty numeric sequences. Invalid input raises \verb|ValueError|. Most functions return floats; \verb|five_number_summary| returns a list. A \verb|ddof| of 1 gives the usual sample variance or covariance; 0 gives a population denominator. Quantiles use linear interpolation at index $p(n-1)$.
+\begin{verbatim}
+mean(x)                       median(x)
+mode(x)                       variance(x, ddof=1)
+standard_deviation(x, ddof=1) skewness(x)
+excess_kurtosis(x)            quantile(x, p)
+percentile(x, p)              interquartile_range(x)
+five_number_summary(x)       covariance(x, y, ddof=1)
+pearson_correlation(x, y)
+spearman_correlation(x, y)
+weighted_mean(x, weights)
+weighted_variance(x, weights)
+weighted_covariance(x, y, weights)
+weighted_correlation(x, y, weights)
+weighted_quantile(x, weights, p)
+log_sum_exp(x)
+\end{verbatim}
+\verb|quantile| takes \verb|p| in $[0,1]$; \verb|percentile| takes \verb|p| in $[0,100]$. Mode counts exact equal values and returns the smallest on a tie. Skewness and excess kurtosis use population central moments without small-sample correction and require positive variance. Correlations require both inputs to vary. The weighted functions require aligned, strictly positive finite weights and divide by the weight sum; weighted variance and covariance have no degrees-of-freedom correction.
+\begin{verbatim}
+import mathbr
+s = mathbr.statistics
+data = [1.0, 2.0, 2.0, 3.0, 4.0]
+print(s.mean(data), s.median(data), s.mode(data))
+print(s.five_number_summary(data))
+print(s.variance(data), s.standard_deviation(data))
+print(s.weighted_mean([0.0, 2.0], [1.0, 3.0]))
+print(s.spearman_correlation([1, 2, 3], [3, 2, 1]))
+print(s.weighted_quantile([0, 10, 20], [1, 2, 1], 0.5))
+print(s.log_sum_exp([1000, 1000]))
+\end{verbatim}
+\verb|weighted_quantile| uses the smallest observed value whose cumulative sorted weight reaches \verb|p| of the total; it is a step function, unlike the unweighted interpolated quantile. \verb|log_sum_exp| subtracts the maximum internally to avoid exponent overflow, and requires a nonempty finite vector.
+These are descriptive, in-sample summaries. They do not provide hypothesis tests, missing-data handling, or uncertainty estimates.
+
+\section{Nonparametric estimation}
+The \verb|mathbr.nonparametric| submodule evaluates an empirical CDF, Gaussian kernel density estimate, or Nadaraya--Watson kernel regression at a vector of query points. Samples must be nonempty and finite; query points may be an empty vector. Bandwidths must be finite and positive. A fixed bandwidth is supplied by the caller; no automatic selection or boundary correction is provided.
+\begin{verbatim}
+empirical_cdf(sample, points)
+gaussian_kde(sample, points, bandwidth)
+nadaraya_watson(x, y, points, bandwidth)
+\end{verbatim}
+The empirical CDF counts observations less than or equal to each point. KDE averages standard Gaussian kernels divided by bandwidth. Nadaraya--Watson predicts a locally weighted mean of \verb|y| at each point; it shifts log weights to improve numerical behavior for distant queries. KDE and kernel regression cost $O(nm)$ for $n$ observations and $m$ query points; the empirical CDF sorts once and then uses binary search.
+\begin{verbatim}
+import mathbr
+n = mathbr.nonparametric
+print(n.empirical_cdf([2, 1, 2, 3], [1, 2, 3]))
+print(n.gaussian_kde([-1, 1], [0], bandwidth=1))
+print(n.nadaraya_watson([-1, 1], [2, 4],
+                         [0], bandwidth=1))
+\end{verbatim}
+
+\section{Hypothesis tests}
+The \verb|mathbr.hypothesis| submodule provides two-sided t-tests. Each call returns a \verb|TTestResult| with read-only float attributes \verb|statistic|, \verb|degrees_of_freedom|, and \verb|p_value|. Inputs must be finite with at least two observations and positive relevant variance; otherwise the call raises \verb|ValueError|.
+\begin{verbatim}
+one_sample_t_test(x, null_mean=0.0)
+paired_t_test(before, after)
+welch_t_test(x, y)
+bonferroni_correction(p_values)
+holm_correction(p_values)
+benjamini_hochberg_correction(p_values)
+proportion_z_test(successes, trials, null_p)
+chi_square_goodness_of_fit(observed, expected)
+\end{verbatim}
+The paired test analyzes aligned \verb|before - after| differences. Welch's test uses separate sample variances and an approximate Satterthwaite degrees of freedom; it does not assume equal population variances. Exact one-sample and paired small-sample p-values require independent Gaussian observations or Gaussian paired differences. Welch assumes independent samples and uses an approximate reference distribution. The three correction functions return adjusted p-values in input order; Bonferroni and Holm target family-wise error, while Benjamini-Hochberg targets false discovery rate under independence or suitable positive dependence.
+\begin{verbatim}
+import mathbr
+h = mathbr.hypothesis
+one = h.one_sample_t_test([1.0, 2.0, 3.0])
+paired = h.paired_t_test([3, 4, 5], [1, 2, 4])
+welch = h.welch_t_test([1, 2, 3], [2, 4, 6])
+for result in (one, paired, welch):
+    print(result.statistic, result.degrees_of_freedom,
+          result.p_value)
+print(h.holm_correction([0.01, 0.04, 0.03]))
+z = h.proportion_z_test(60, 100, 0.5)
+chi = h.chi_square_goodness_of_fit([10, 20, 30],
+                                   [20, 20, 20])
+print(z.statistic, z.p_value)
+print(chi.statistic, chi.degrees_of_freedom,
+      chi.p_value)
+\end{verbatim}
+The proportion test returns \verb|ZTestResult| and needs at least five expected successes and failures. The goodness-of-fit test returns \verb|ChiSquareTestResult| and uses $k-1$ degrees of freedom only when no distribution parameters were estimated from the tested counts. Small expected bin counts can make its chi-squared approximation unreliable.
+
+\section{Binary classification evaluation}
+The \verb|mathbr.evaluation| submodule accepts aligned binary labels, with 1 as the positive class. The confusion matrix has true classes in its rows and predicted classes in its columns:
+\begin{verbatim}
+[[TN, FP], [FN, TP]]
+\end{verbatim}
+Undefined precision, recall, or F1 returns zero. All functions reject empty or mismatched inputs, labels outside 0 and 1, and non-finite scores.
+\begin{verbatim}
+confusion_matrix(y_true, y_pred)
+precision(y_true, y_pred)
+recall(y_true, y_pred)
+f1_score(y_true, y_pred)
+roc_curve(y_true, scores)
+roc_auc(y_true, scores)
+precision_recall_curve(y_true, scores)
+rmse(y_true, y_pred)
+mae(y_true, y_pred)
+mape(y_true, y_pred)
+log_loss(y_true, probabilities)
+k_fold_indices(n_samples, n_splits, seed=0)
+calibration_curve(y_true, probabilities, n_bins=10)
+\end{verbatim}
+\verb|roc_curve| returns a \verb|RocCurve| with read-only \verb|fpr|, \verb|tpr|, and \verb|thresholds| arrays. Its first point is (0, 0) at an infinite threshold. \verb|precision_recall_curve| returns a \verb|PrecisionRecallCurve| with read-only \verb|precision|, \verb|recall|, and \verb|thresholds| arrays. Each point corresponds to classifying scores at or above its threshold as positive. Both curves require examples of both classes, group tied scores, and sort thresholds in descending order. ROC AUC integrates the trapezoids between successive ROC points.
+\begin{verbatim}
+import mathbr
+e = mathbr.evaluation
+actual = [0, 0, 1, 1]
+scores = [0.1, 0.4, 0.35, 0.8]
+predicted = [int(score >= 0.5) for score in scores]
+print(e.confusion_matrix(actual, predicted))
+print(e.precision(actual, predicted), e.recall(actual, predicted))
+print(e.f1_score(actual, predicted), e.roc_auc(actual, scores))
+roc = e.roc_curve(actual, scores)
+pr = e.precision_recall_curve(actual, scores)
+print(roc.fpr, roc.tpr, roc.thresholds)
+print(pr.precision, pr.recall, pr.thresholds)
+\end{verbatim}
+At threshold 0.5, this example has two true negatives, one false negative, and one true positive. Precision is 1 because its sole positive prediction is correct; recall is 0.5 because it finds only one of two positives. The ROC AUC is 0.75. Threshold-dependent scores answer a different question from AUC, which uses the ordering of all scores. Evaluate these metrics on held-out observations when judging a trained classifier.
+Regression metrics take finite, aligned numeric vectors. \verb|rmse| is root mean squared error and \verb|mae| is mean absolute error. \verb|mape| returns a fraction rather than a percentage and rejects zero targets. \verb|log_loss| takes binary labels and probabilities in $[0,1]$; a confidently wrong probability of exactly zero or one yields infinity. \verb|k_fold_indices| returns seeded, shuffled validation index lists; use the complementary indices for each training fold. It balances fold sizes to within one observation. \verb|calibration_curve| uses equal-width probability bins, omits empty bins, and returns a \verb|CalibrationCurve| with read-only \verb|mean_predicted|, \verb|fraction_positive|, and \verb|counts| arrays.
+\begin{verbatim}
+import mathbr
+e = mathbr.evaluation
+print(e.rmse([2, 4], [1, 6]), e.mae([2, 4], [1, 6]))
+print(e.mape([2, 4], [1, 6]))
+print(e.log_loss([0, 1], [0.2, 0.8]))
+folds = e.k_fold_indices(8, 3, seed=7)
+print("validation folds:", folds)
+cal = e.calibration_curve([0, 1, 1, 0],
+                          [0.0, 0.2, 0.5, 1.0], n_bins=2)
+print(cal.mean_predicted, cal.fraction_positive,
+      cal.counts)
+\end{verbatim}
+
+\section{Probability distributions}
+The functions below are in \verb|mathbr.distributions|. A PDF is a density, a PMF is a discrete probability, a CDF is cumulative probability, and a PPF is the inverse CDF. Log forms help with tiny probabilities. Invalid parameters raise \verb|ValueError|; iterative special-function nonconvergence can raise \verb|RuntimeError|.
+
+\subsection{Standard normal}
+The standard normal has mean zero and variance one. Each \verb|x| must be finite. Each \verb|p| must be finite and in $[0,1]$. The PPF returns negative or positive infinity at $p=0$ or $p=1$.
+\begin{verbatim}
+normal_pdf(x)       normal_logpdf(x)
+normal_cdf(x)       normal_logcdf(x)
+normal_ppf(p)
+\end{verbatim}
+All return floats. The PDF can underflow far into a tail; use the log-PDF there. The CDF uses \verb|erfc|, the far lower-tail log-CDF uses an asymptotic expansion, and the PPF uses bisection.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.normal_pdf(0.0), d.normal_cdf(1.0), d.normal_ppf(0.975))
+\end{verbatim}
+
+\subsection{Student-t}
+The standardized Student-t functions take finite \verb|x| and finite, positive degrees of freedom \verb|df|. The PPF additionally takes \verb|p| in $[0,1]$ and returns infinities at the endpoints. They do not estimate location, scale, or degrees of freedom.
+\begin{verbatim}
+student_t_pdf(x, df)       student_t_logpdf(x, df)
+student_t_cdf(x, df)       student_t_logcdf(x, df)
+student_t_ppf(p, df)
+\end{verbatim}
+Each returns a float. The CDF uses a regularized incomplete-beta continued fraction; its logarithmic form retains lower-tail precision. The PPF uses bracketing and bisection, so it is costlier than a direct approximation. Invalid arguments raise \verb|ValueError|; failed continued-fraction convergence raises \verb|RuntimeError|. OLS and WLS use Student-t for classical p-values and intervals under their stated error assumptions.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.student_t_cdf(1.0, 10.0))
+print(d.student_t_ppf(0.975, 10.0))
+\end{verbatim}
+
+\subsection{Chi-squared and F}
+Chi-squared takes finite positive degrees of freedom \verb|df|. F takes two finite positive degrees of freedom, \verb|df1| and \verb|df2|. Both distributions have nonnegative support. Invalid parameters or non-finite \verb|x| raise \verb|ValueError|; numerical nonconvergence can raise \verb|RuntimeError|. Each function returns a float.
+\begin{verbatim}
+chi_square_pdf(x, df)    chi_square_logpdf(x, df)
+chi_square_cdf(x, df)    chi_square_logcdf(x, df)
+chi_square_ppf(p, df)
+f_pdf(x, df1, df2)       f_logpdf(x, df1, df2)
+f_cdf(x, df1, df2)       f_logcdf(x, df1, df2)
+f_ppf(p, df1, df2)
+\end{verbatim}
+\verb|p| must be finite in $[0,1]$. Each PPF returns zero at $p=0$ and infinity at $p=1$. A density can be infinite exactly at zero when its first degree of freedom is below two. Chi-squared CDF uses incomplete gamma; F CDF uses incomplete beta. Both PPFs use bracketed bisection, and extreme-tail results can be limited by double-precision rounding.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.chi_square_cdf(2.0, df=4.0))
+print(d.chi_square_ppf(0.95, df=4.0))
+print(d.f_cdf(1.0, df1=5.0, df2=10.0))
+print(d.f_ppf(0.95, df1=5.0, df2=10.0))
+\end{verbatim}
+These distribution functions are mathematical building blocks. They do not automatically produce valid p-values for a fitted model; the model-specific test statistic and assumptions must be established first.
+
+\subsection{Uniform}
+The interval bounds \verb|a| and \verb|b| must be finite, satisfy \verb|a < b|, and have finite width. \verb|x| must be finite and \verb|p| must lie in $[0,1]$. All functions return floats.
+\begin{verbatim}
+uniform_pdf(x, a, b)       uniform_logpdf(x, a, b)
+uniform_cdf(x, a, b)       uniform_logcdf(x, a, b)
+uniform_ppf(p, a, b)
+\end{verbatim}
+The PDF is $1/(b-a)$ within the interval and zero outside; the log-PDF is negative infinity outside. The CDF is linear inside, zero below, and one above. The PPF returns \verb|a| and \verb|b| at its endpoints. Invalid inputs raise \verb|ValueError|.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.uniform_pdf(0.0, -1.0, 1.0))
+print(d.uniform_cdf(0.0, -1.0, 1.0))
+print(d.uniform_ppf(0.5, -1.0, 1.0))
+\end{verbatim}
+
+\subsection{Bernoulli and Binomial}
+\verb|k| is an integer outcome and \verb|p| is a finite success probability in $[0,1]$. Binomial also takes nonnegative integer trial count \verb|n|. Out-of-support \verb|k| has zero PMF; CDFs are zero below and one above support. All return floats. Invalid \verb|p| or \verb|n| raises \verb|ValueError|.
+\begin{verbatim}
+bernoulli_pmf(k, p)         bernoulli_cdf(k, p)
+binomial_pmf(k, n, p)      binomial_cdf(k, n, p)
+\end{verbatim}
+Binomial assumes independent trials sharing one success probability. Its CDF may require $O(n)$ work, and extreme PMFs can underflow.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.bernoulli_pmf(1, 0.3))
+print(d.binomial_pmf(2, 4, 0.5), d.binomial_cdf(2, 4, 0.5))
+\end{verbatim}
+
+\subsection{Exponential, Weibull, Laplace, Cauchy, and log-normal}
+These families expose PDF, CDF, and PPF functions. The exponential uses a positive rate; Weibull uses positive shape and scale; Laplace and Cauchy use finite location and positive scale; log-normal uses finite underlying-normal mean \verb|mu| and positive standard deviation \verb|sigma|. Inputs \verb|x| must be finite and PPF probabilities must lie in $[0,1]$.
+\begin{verbatim}
+exponential_pdf(x, rate)   exponential_cdf(x, rate)
+exponential_ppf(p, rate)
+weibull_pdf(x, shape, scale) weibull_cdf(x, shape, scale)
+weibull_ppf(p, shape, scale)
+laplace_pdf(x, location, scale) laplace_cdf(x, location, scale)
+laplace_ppf(p, location, scale)
+cauchy_pdf(x, location, scale) cauchy_cdf(x, location, scale)
+cauchy_ppf(p, location, scale)
+lognormal_pdf(x, mu, sigma) lognormal_cdf(x, mu, sigma)
+lognormal_ppf(p, mu, sigma)
+\end{verbatim}
+Exponential, Weibull, and log-normal support nonnegative values; their density and CDF are zero below support. Weibull's density at zero is infinite for shape below one, $1/\mathrm{scale}$ at shape one, and zero above shape one. The Cauchy distribution has no finite mean or variance. PPF endpoints return support boundaries or infinities as appropriate.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.exponential_cdf(1.0, rate=2.0))
+print(d.weibull_ppf(0.5, shape=2.0, scale=3.0))
+print(d.laplace_pdf(0.0, location=0.0, scale=1.0))
+print(d.cauchy_cdf(0.0, location=0.0, scale=1.0))
+print(d.lognormal_ppf(0.5, mu=0.0, sigma=1.0))
+\end{verbatim}
+
+\subsection{Gamma and Beta}
+The gamma distribution uses positive shape and scale, and the beta distribution uses positive \verb|alpha| and \verb|beta| shape parameters. Their CDFs use the incomplete gamma and beta routines already used by the chi-squared and F distributions. Quantiles use bounded bisection and may be slower than the corresponding density or CDF calls.
+\begin{verbatim}
+gamma_pdf(x, shape, scale) gamma_cdf(x, shape, scale)
+gamma_ppf(p, shape, scale)
+beta_pdf(x, alpha, beta)  beta_cdf(x, alpha, beta)
+beta_ppf(p, alpha, beta)
+\end{verbatim}
+Gamma support is nonnegative and beta support is $[0,1]$. A density may be infinite at a support boundary when its corresponding shape is below one. Quantile probabilities must lie in $[0,1]$.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.gamma_cdf(1.0, shape=1.0, scale=2.0))
+print(d.gamma_ppf(0.5, shape=2.0, scale=3.0))
+print(d.beta_pdf(0.5, alpha=2.0, beta=2.0))
+print(d.beta_ppf(0.95, alpha=2.0, beta=5.0))
+\end{verbatim}
+
+\section{Gradient-descent models}
+\subsection{LinearRegression}
+\verb|LinearRegression(n_features)| trains a linear model by full-batch MSE gradient descent. \verb|n_features| must be positive. \verb|fit(X, y, lr=0.01, epochs=1000)| accepts nonempty, matching data, rows of the declared width, positive finite learning rate, and positive epoch count. Invalid input raises \verb|ValueError|. The fit returns \verb|None|.
+\begin{verbatim}
+predict(x)        -> float       predict_batch(X) -> list[float]
+get_weights()     -> list[float] get_bias()       -> float
+trained()         -> bool
+\end{verbatim}
+Prediction rows must have the declared width. Initial zero coefficients can be queried before training. This model supplies no coefficient inference; feature scale affects convergence.
+\begin{verbatim}
+import mathbr
+m = mathbr.LinearRegression(1)
+m.fit([[0.0], [1.0], [2.0]], [1.0, 3.0, 5.0], lr=0.1)
+print(m.get_weights(), m.get_bias(), m.predict([3.0]))
+\end{verbatim}
+
+\subsection{LogisticRegression}
+\verb|LogisticRegression(n_features)| uses full-batch gradient descent for binary log loss. The constructor and \verb|fit(X, y, lr=0.01, epochs=1000)| have the same shape and tuning constraints as LinearRegression, while labels must be 0 or 1. Fit returns \verb|None|. Invalid inputs raise \verb|ValueError|.
+\begin{verbatim}
+predict_proba(x)       -> float
+predict_proba_batch(X) -> list[float]
+predict(x, threshold=0.5) -> int
+get_weights() -> list[float]  get_bias() -> float
+trained() -> bool
+\end{verbatim}
+\verb|threshold| must be finite in $[0,1]$. The class does not report standard errors, calibration metrics, or classification diagnostics.
+\begin{verbatim}
+import mathbr
+m = mathbr.LogisticRegression(1)
+m.fit([[-2.0], [-1.0], [1.0], [2.0]], [0, 0, 1, 1],
+      lr=0.2, epochs=500)
+print(m.predict_proba([1.0]), m.predict([1.0]))
+\end{verbatim}
+
+\section{Least squares}
+\subsection{OLS}
+\verb|OLS(n_features)| includes an intercept and solves ordinary least squares by Householder QR decomposition. \verb|fit(X, y)| requires finite, full-rank data, rows of the declared positive feature width, and more observations than coefficients. It returns \verb|None|. Invalid input or rank deficiency raises \verb|ValueError|.
+\begin{verbatim}
+predict(x)            -> float
+predict_batch(X)      -> list[float]
+coefficients()        -> list[float]  # intercept, then slopes
+standard_errors()     -> list[float]
+t_statistics()        -> list[float]
+p_values()            -> list[float]
+confidence_intervals(level=0.95) -> list[list[float]]
+r_squared()           -> float
+adjusted_r_squared()  -> float
+f_statistic()         -> float
+residual_variance()   -> float
+degrees_of_freedom()  -> int
+trained()             -> bool
+\end{verbatim}
+Fitted results and prediction before fit raise \verb|RuntimeError|. The p-values are two-sided and use Student-t with residual degrees of freedom. Intervals use the same reference distribution; the level must be in $(0,1)$. The overall F-statistic compares against an intercept-only model. Zero residual variance makes t/F inference undefined and raises \verb|ValueError|. Classical standard errors assume independent, homoscedastic errors; exact small-sample t/F inference additionally assumes Gaussian errors. Robust errors are absent.
+\begin{verbatim}
+import mathbr
+m = mathbr.OLS(1)
+m.fit([[0.0], [1.0], [2.0], [3.0]], [1.0, 3.0, 5.0, 8.0])
+print(m.coefficients(), m.standard_errors(), m.r_squared())
+print(m.t_statistics(), m.p_values())
+print(m.confidence_intervals(), m.f_statistic())
+\end{verbatim}
+
+\subsection{WLS}
+\verb|WLS(n_features)| inherits every OLS result and prediction method above, including p-values, confidence intervals, adjusted $R^2$, and the overall F-statistic. Its fit method takes \verb|X|, \verb|y|, and \verb|weights|. It requires one strictly positive finite weight per observation and returns \verb|None|. Invalid weights raise \verb|ValueError|. The residual variance and $R^2$ are weighted. Classical WLS inference assumes independent Gaussian errors and weights proportional to inverse error variance.
+\begin{verbatim}
+import mathbr
+m = mathbr.WLS(1)
+m.fit([[0.0], [1.0], [2.0]], [0.0, 1.0, 4.0],
+      [1.0, 1.0, 0.1])
+print(m.coefficients(), m.predict([3.0]))
+\end{verbatim}
+
+\section{Regression diagnostics}
+The \verb|mathbr.diagnostics| submodule computes information criteria from a supplied maximized log likelihood and parameter count, or diagnostics from ordered residuals. It does not fit a likelihood model automatically. The parameter count should include all estimated parameters according to the model-comparison convention you use.
+\begin{verbatim}
+aic(log_likelihood, n_parameters)
+bic(log_likelihood, n_parameters, n_observations)
+hqic(log_likelihood, n_parameters, n_observations)
+residual_standard_error(residuals, n_parameters)
+durbin_watson(residuals)
+jarque_bera_statistic(residuals)
+jarque_bera_p_value(residuals)
+\end{verbatim}
+AIC is $-2\ell+2k$, BIC is $-2\ell+k\log n$, and HQIC is $-2\ell+2k\log\log n$. Residual standard error is $\sqrt{\sum e_i^2/(n-k)}$. Durbin--Watson is $\sum_{i=2}^n(e_i-e_{i-1})^2/\sum e_i^2$; residual order matters. Jarque--Bera uses sample skewness and excess kurtosis and its p-value uses the asymptotic chi-squared distribution with two degrees of freedom. These statistics do not establish model validity on their own.
+\begin{verbatim}
+import mathbr
+d = mathbr.diagnostics
+residuals = [-2.0, -1.0, 0.0, 1.0, 2.0]
+print(d.aic(-10.0, 2), d.bic(-10.0, 2, 5))
+print(d.hqic(-10.0, 2, 5))
+print(d.residual_standard_error(residuals, 2))
+print(d.durbin_watson(residuals))
+print(d.jarque_bera_statistic(residuals),
+      d.jarque_bera_p_value(residuals))
+\end{verbatim}
+
+\section{Regularized regression}
+The constructor signatures are:
+\begin{verbatim}
+Ridge(n_features, alpha=1.0, max_iter=1000, tol=1e-8)
+Lasso(n_features, alpha=1.0, max_iter=1000, tol=1e-8)
+ElasticNet(n_features, alpha=1.0, l1_ratio=0.5,
+           max_iter=1000, tol=1e-8)
+\end{verbatim}
+Ridge uses an L2 penalty, Lasso uses L1, and ElasticNet mixes them. Feature count and iteration limit must be positive; \verb|alpha| must be finite and nonnegative, \verb|tol| finite and positive, and \verb|l1_ratio| in $[0,1]$. Invalid settings raise \verb|ValueError|.
+\begin{verbatim}
+fit(X, y)       -> None       predict(x)       -> float
+predict_batch(X) -> list[float]
+coefficients()  -> list[float] intercept()      -> float
+iterations()    -> int        converged()      -> bool
+trained()       -> bool
+\end{verbatim}
+Fit requires finite, nonempty rows and targets with matching dimensions; invalid input raises \verb|ValueError|. Fitted results before fit raise \verb|RuntimeError|. The intercept is unpenalized. Features are not standardized, so their scales affect the penalty. There are no standard errors; always check \verb|converged()|.
+\begin{verbatim}
+import mathbr
+m = mathbr.ElasticNet(1, alpha=0.1, l1_ratio=0.5)
+m.fit([[-1.0], [0.0], [1.0]], [-2.0, 0.0, 2.0])
+print(m.intercept(), m.coefficients(), m.converged())
+\end{verbatim}
+
+\section{Econometrics}
+\subsection{IV2SLS}
+\verb|IV2SLS(n_exog, n_endog, n_instruments)| specifies counts of exogenous regressors, endogenous regressors, and excluded instruments. \verb|fit(exog, endog, instruments, y)| takes aligned, finite matrices and targets and returns \verb|None|. There must be sufficient instruments and full-rank stages; invalid inputs raise \verb|ValueError|.
+\begin{verbatim}
+predict(exog, endog)      -> float
+coefficients()           -> list[float]
+first_stage_r_squared()  -> list[float]
+trained()                -> bool
+\end{verbatim}
+Coefficients are ordered intercept, exogenous slopes, then endogenous slopes. Fitted results before fit raise \verb|RuntimeError|. Instrument relevance and exclusion must be justified externally. First-stage $R^2$ is not a weak-instrument test; this class does not provide valid 2SLS standard errors.
+\begin{verbatim}
+import mathbr
+m = mathbr.IV2SLS(0, 1, 1)
+m.fit([[], [], [], [], []], [[0], [2], [1], [4], [3]],
+      [[0], [1], [2], [3], [4]], [1, 5, 3, 9, 7])
+print(m.coefficients(), m.first_stage_r_squared())
+\end{verbatim}
+
+\subsection{FixedEffects}
+\verb|FixedEffects(n_features)| estimates within-entity slopes. \verb|fit(X, y, entity_ids)| takes finite rows, targets, and aligned integer entity IDs, and returns \verb|None|. Features without within-entity variation cannot be identified; bad dimensions or rank deficiency raise \verb|ValueError|.
+\begin{verbatim}
+predict(x, entity_id)       -> float
+coefficients()              -> list[float]  # within slopes
+entity_intercept(entity_id) -> float
+within_r_squared()          -> float
+trained()                   -> bool
+\end{verbatim}
+An unknown entity for prediction raises \verb|ValueError|; fitted results before fit raise \verb|RuntimeError|. The model has no time effects or clustered standard errors.
+\begin{verbatim}
+import mathbr
+m = mathbr.FixedEffects(1)
+m.fit([[0], [1], [2], [0], [1], [2]],
+      [1, 3, 5, 10, 12, 14], [10, 10, 10, 20, 20, 20])
+print(m.coefficients(), m.entity_intercept(20))
+\end{verbatim}
+
+\section{Time series}
+\verb|AR(lags)| fits one series; \verb|VAR(n_series, lags)| fits multiple series. Lag counts and series count must be positive. \verb|AR.fit(observations)| takes a finite sequence; \verb|VAR.fit(observations)| takes finite rows with \verb|n_series| columns. Both need enough data and full-rank lag matrices; otherwise they raise \verb|ValueError|. Fit returns \verb|None|.
+\begin{verbatim}
+AR:  coefficients() -> list[float]
+     forecast(steps) -> list[float]
+     trained()       -> bool
+VAR: coefficients()         -> list[list[float]]
+     forecast(steps)         -> list[list[float]]
+     residual_covariance()   -> list[list[float]]
+     trained()               -> bool
+\end{verbatim}
+Forecast steps must be positive; fitted results before fit raise \verb|RuntimeError|. AR coefficients begin with the intercept. Each VAR equation has intercept, then lag-1 series, lag-2 series, and so on. Neither class chooses lags, tests stationarity, or provides forecast intervals.
+\begin{verbatim}
+import mathbr
+ar = mathbr.AR(1)
+ar.fit([1, 2, 4, 8, 16, 32])
+print(ar.coefficients(), ar.forecast(2))
+\end{verbatim}
+
+\section{Time-series diagnostics}
+The \verb|mathbr.time_series_diagnostics| submodule computes direct, biased sample autocorrelation, partial autocorrelation by Durbin--Levinson recursion, and the Ljung--Box portmanteau statistic. Inputs must contain at least two finite, varying observations. The largest lag must be smaller than the series length.
+\begin{verbatim}
+acf(x, max_lag)
+pacf(x, max_lag)
+ljung_box(x, lags)
+\end{verbatim}
+\verb|acf| and \verb|pacf| return lists from lag zero through \verb|max_lag|, with lag zero equal to one. Direct ACF costs $O(nk)$ for $k$ requested lags; PACF adds $O(k^2)$ recursion. \verb|ljung_box| returns a \verb|LjungBoxResult| with read-only \verb|statistic|, \verb|p_value|, and \verb|lags|. Its p-value uses a chi-squared reference with degrees of freedom equal to the requested lags, with no correction for fitted model parameters. The approximation should be interpreted cautiously for short series.
+\begin{verbatim}
+import mathbr
+d = mathbr.time_series_diagnostics
+series = [1.0, 2.0, 3.0, 2.0, 1.0, 0.0]
+print(d.acf(series, 2))
+print(d.pacf(series, 2))
+result = d.ljung_box(series, 2)
+print(result.statistic, result.p_value, result.lags)
+\end{verbatim}
+
+\section{Volatility}
+\verb|GARCH(max_iter=2000, tol=1e-7, arch_only=False)| fits GARCH(1,1). Set \verb|arch_only=True| to fix beta at zero. \verb|ARCH(max_iter=2000, tol=1e-7)| is the ARCH(1) subclass. Iteration limit and tolerance must be positive. \verb|fit(observations)| requires at least 20 finite observations with positive variance, returns \verb|None|, and raises \verb|ValueError| otherwise.
+\begin{verbatim}
+mean()                 -> float
+omega()                -> float
+alpha()                -> float
+beta()                 -> float
+log_likelihood()       -> float
+conditional_variance() -> list[float]
+forecast_variance(steps) -> list[float]
+converged()            -> bool
+trained()              -> bool
+\end{verbatim}
+\verb|forecast_variance| requires positive steps. Fitted results before fit raise \verb|RuntimeError|. These constant-mean, symmetric Gaussian quasi-likelihood models have no coefficient standard errors, asymmetric shocks, or non-Gaussian innovations. Check \verb|converged()| before interpreting parameters.
+\begin{verbatim}
+import mathbr
+m = mathbr.GARCH()
+m.fit([-2.0, -1.0, 0.5, 1.0, 2.0] * 20)
+print(m.omega(), m.alpha(), m.beta())
+print(m.forecast_variance(3), m.converged())
+\end{verbatim}
+
+\section{Conjugate Bayesian updating}
+The \verb|mathbr.bayesian| submodule provides two closed-form posterior updates. Beta--Binomial takes a positive beta prior and independent Bernoulli trials with a shared success probability. Normal--Normal takes a normal prior for a mean and independent normal observations with a \emph{known} common observation standard deviation. These assumptions are inputs to the analysis, not checked by the code.
+\begin{verbatim}
+beta_binomial_update(alpha, beta, successes, trials)
+normal_normal_update(prior_mean, prior_sd,
+                     observation_sd, observations)
+BetaPosterior.mean()
+BetaPosterior.credible_interval(level=0.95)
+NormalPosterior.credible_interval(level=0.95)
+\end{verbatim}
+The beta posterior exposes its shape parameters and mean. The normal posterior exposes its mean and standard deviation. Both interval methods return equal-tailed bounds. The level must lie strictly between zero and one. These are posterior probability intervals under their stated models, rather than frequentist coverage guarantees.
+\begin{verbatim}
+import mathbr
+b = mathbr.bayesian
+rate = b.beta_binomial_update(1, 1, successes=7,
+                              trials=10)
+print(rate.alpha, rate.beta, rate.mean())
+print(rate.credible_interval(0.95))
+normal = b.normal_normal_update(0, 1, 1, [1, 3])
+print(normal.mean, normal.standard_deviation)
+print(normal.credible_interval(0.95))
+\end{verbatim}
+The uniform Beta(1,1) prior becomes Beta(8,4) after seven successes in ten trials, giving a posterior mean of $8/12\approx0.667$. The normal example has prior mean zero and two observations with mean two. With all standard deviations equal to one, its posterior mean is $4/3$ and its posterior standard deviation is $1/\sqrt{3}$. The intervals express uncertainty conditional on these prior and likelihood choices.
+
+\section{Right-censored survival analysis}
+The \verb|mathbr.survival| submodule accepts nonnegative, finite observation times and binary event indicators: 1 means the event occurred, 0 means right censored. It assumes independent censoring and no delayed entry. A group indicator of 0 or 1 is required for the log-rank test.
+\begin{verbatim}
+kaplan_meier(times, events)
+log_rank_test(times, events, groups)
+\end{verbatim}
+\verb|kaplan_meier| returns a \verb|KaplanMeierResult| with read-only \verb|times|, \verb|survival|, \verb|at_risk|, and \verb|events| arrays at each distinct observed time. The survival estimate changes only at event times. Events at a tied time count before all subjects at that time leave the risk set. \verb|log_rank_test| returns a \verb|LogRankResult| with read-only \verb|statistic| and \verb|p_value|. It compares two groups using pooled risk sets and a chi-squared reference with one degree of freedom. It needs events and a positive test variance. These functions do not account for covariates, competing risks, or left truncation.
+\begin{verbatim}
+import mathbr
+s = mathbr.survival
+curve = s.kaplan_meier([1, 2, 2, 3], [1, 0, 1, 1])
+print(curve.times, curve.survival)
+print(curve.at_risk, curve.events)
+comparison = s.log_rank_test([1, 1, 2, 2],
+                             [1, 1, 1, 1], [0, 0, 1, 1])
+print(comparison.statistic, comparison.p_value)
+\end{verbatim}
+In the Kaplan--Meier example, the survival estimates after times 1, 2, and 3 are 0.75, 0.50, and 0. The subject censored at time 2 remains in the risk set for events at that time, then leaves it. The log-rank p-value compares event timing between the two example groups under its null model; it does not quantify an effect size.
+
+\section{Worked examples}
+These examples use small data sets so that the inputs and results are easy to inspect. Each code block can be run independently after installing \texttt{mathbr}.
+
+\subsection{Machine learning: fit, predict, and evaluate held-out data}
+Keep the final two observations out of fitting. Fit an OLS line on the first four observations, predict the held-out targets, and then calculate two error measures. This separates estimation from evaluation, even though the toy data are much smaller than a real study.
+\begin{verbatim}
+import math
+import mathbr
+X_train = [[0.0], [1.0], [2.0], [3.0]]
+y_train = [1.0, 3.0, 5.0, 7.0]
+X_test = [[4.0], [5.0]]
+y_test = [9.0, 12.0]
+model = mathbr.OLS(1)
+model.fit(X_train, y_train)
+predicted = model.predict_batch(X_test)
+rmse = mathbr.evaluation.rmse(y_test, predicted)
+mape = mathbr.evaluation.mape(y_test, predicted)
+print("intercept and slope:", model.coefficients())
+print("held-out predictions:", predicted)
+print("RMSE:", rmse, "MAPE fraction:", mape)
+assert all(math.isclose(a, b) for a, b in
+           zip(predicted, [9.0, 11.0]))
+assert math.isclose(rmse, math.sqrt(0.5))
+\end{verbatim}
+The fitted line has intercept 1 and slope 2. Its first held-out prediction is exact; the second misses by 1, so RMSE is $\sqrt{(0^2+1^2)/2}\approx0.707$. MAPE is $(0/9+1/12)/2\approx0.0417$, a fraction equivalent to about 4.17 percent. Do not use the test targets to tune the model and then report the same error as an untouched test result.
+
+\subsection{Machine learning: compare regularization strengths}
+Fit the same one-feature data with three penalties. Their slope estimates differ because the penalties shrink coefficients differently. Check convergence before using a penalized fit.
+\begin{verbatim}
+import mathbr
+X = [[-1.0], [0.0], [1.0]]
+y = [-2.0, 0.0, 2.0]
+for name, model in [
+    ("Ridge", mathbr.Ridge(1, alpha=1.0)),
+    ("Lasso", mathbr.Lasso(1, alpha=0.5)),
+    ("Elastic Net", mathbr.ElasticNet(1, alpha=1.0))
+]:
+    model.fit(X, y)
+    print(name, model.coefficients(), model.converged())
+\end{verbatim}
+These coefficients are not directly comparable across differently scaled features because automatic standardization is absent. No standard errors or p-values are available for these penalized models.
+
+\subsection{Machine learning: binary probabilities and decisions}
+Fit a binary classifier, inspect probabilities, and apply a decision threshold. A higher threshold changes the class decision, not the fitted probability.
+\begin{verbatim}
+import mathbr
+X = [[-2.0], [-1.0], [1.0], [2.0]]
+y = [0, 0, 1, 1]
+model = mathbr.LogisticRegression(1)
+model.fit(X, y, lr=0.2, epochs=500)
+for row in [[-1.0], [0.0], [1.0]]:
+    print(row, model.predict_proba(row),
+          model.predict(row, threshold=0.7))
+\end{verbatim}
+These predictions use the fitted sample. Assess generalization with evaluation metrics on held-out observations. The class does not automatically calibrate its probabilities.
+
+\subsection{Statistics: inspect an OLS fit}
+Estimate an intercept and slope, then calculate residuals and an in-sample RMSE using the loss submodule. The standard errors returned by OLS are classical, not heteroskedasticity-robust.
+\begin{verbatim}
+import mathbr
+X = [[0.0], [1.0], [2.0], [3.0]]
+y = [1.0, 3.0, 5.0, 8.0]
+model = mathbr.OLS(1)
+model.fit(X, y)
+fitted = model.predict_batch(X)
+residuals = [actual - predicted
+             for actual, predicted in zip(y, fitted)]
+print("coefficients:", model.coefficients())
+print("standard errors:", model.standard_errors())
+print("two-sided p-values:", model.p_values())
+print("95% confidence intervals:",
+      model.confidence_intervals())
+print("R squared:", model.r_squared())
+print("adjusted R squared:", model.adjusted_r_squared())
+print("residuals:", residuals)
+print("in-sample RMSE:", mathbr.losses.rmse(y, fitted))
+\end{verbatim}
+The p-values and intervals use classical Gaussian-error assumptions; they are not robust to arbitrary heteroskedasticity. The RMSE above is in-sample and is not an out-of-sample error estimate.
+
+\subsection{Statistics: downweight one observation with WLS}
+Use a smaller weight for an observation judged less precise. Weight choice must reflect a defensible error-variance assumption for classical WLS standard errors to be meaningful.
+\begin{verbatim}
+import mathbr
+X = [[0.0], [1.0], [2.0], [3.0]]
+y = [0.0, 1.0, 2.0, 8.0]
+ols = mathbr.OLS(1)
+ols.fit(X, y)
+wls = mathbr.WLS(1)
+wls.fit(X, y, [1.0, 1.0, 1.0, 0.1])
+print("OLS:", ols.coefficients())
+print("WLS:", wls.coefficients())
+\end{verbatim}
+The lower final weight changes the estimated line. WLS weights must always be strictly positive and finite.
+
+\subsection{Econometrics: instrumental variables}
+Separate the observed endogenous regressor from its excluded instrument. The first-stage $R^2$ describes fit, but does not establish instrument validity or provide a weak-instrument test.
+\begin{verbatim}
+import mathbr
+z = [[0.0], [1.0], [2.0], [3.0], [4.0]]
+endog = [[0.0], [2.0], [1.0], [4.0], [3.0]]
+y = [1.0, 5.0, 3.0, 9.0, 7.0]
+model = mathbr.IV2SLS(0, 1, 1)
+model.fit([[] for _ in y], endog, z, y)
+print("intercept and IV slope:", model.coefficients())
+print("first-stage R squared:",
+      model.first_stage_r_squared())
+print("prediction at endog=5:", model.predict([], [5.0]))
+\end{verbatim}
+The class does not verify the exclusion restriction and does not report valid 2SLS standard errors. A causal interpretation needs a credible identification argument outside the code.
+
+\subsection{Econometrics: entity fixed effects}
+The two entities have different intercepts but share a within-entity slope. The fitted slope uses changes within each entity rather than differences in their average levels.
+\begin{verbatim}
+import mathbr
+X = [[0], [1], [2], [0], [1], [2]]
+y = [1, 3, 5, 10, 12, 14]
+entity_ids = [10, 10, 10, 20, 20, 20]
+model = mathbr.FixedEffects(1)
+model.fit(X, y, entity_ids)
+print("within slope:", model.coefficients())
+print("entity 10 intercept:", model.entity_intercept(10))
+print("entity 20 intercept:", model.entity_intercept(20))
+print("entity 20 prediction:", model.predict([3], 20))
+\end{verbatim}
+Prediction requires an entity seen during fitting. The model has no time effects or entity-clustered standard errors.
+
+\subsection{Time series: two-variable forecasting}
+Generate a small two-series history from a known lag-one system, fit VAR(1), and forecast the next two rows. This demonstrates coefficient ordering and recursive forecasts.
+\begin{verbatim}
+import mathbr
+history = [[1.0, 2.0]]
+for _ in range(20):
+    x, y = history[-1]
+    history.append([1.0 + 0.5*x + 0.2*y,
+                    -1.0 + 0.3*x + 0.4*y])
+model = mathbr.VAR(n_series=2, lags=1)
+model.fit(history)
+print("equation coefficients:", model.coefficients())
+print("next two rows:", model.forecast(2))
+print("residual covariance:",
+      model.residual_covariance())
+\end{verbatim}
+VAR does not test stationarity or select the lag order. Its forecasts are point forecasts without intervals.
+
+\subsection{Volatility: compare ARCH and GARCH forecasts}
+Fit both volatility recursions on the same observations. Their first variance forecasts use the last observed shock; later horizons use expected future shocks.
+\begin{verbatim}
+import mathbr
+observations = [-2.0, -1.0, 0.5, 1.0, 2.0] * 20
+for name, model in [("ARCH", mathbr.ARCH()),
+                    ("GARCH", mathbr.GARCH())]:
+    model.fit(observations)
+    print(name, "converged:", model.converged())
+    print("parameters:", model.omega(),
+          model.alpha(), model.beta())
+    print("variance forecast:",
+          model.forecast_variance(3))
+\end{verbatim}
+These are Gaussian quasi-likelihood fits. The optimizer may fail to converge, and the classes provide no parameter standard errors or forecast intervals.
+
+\subsection{Probability: use a quantile as a cutoff}
+A standard-normal or Student-t quantile can be used as a mathematical cutoff. Computing a cutoff does not by itself validate the assumptions of a statistical test.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+normal_cutoff = d.normal_ppf(0.975)
+t_cutoff = d.student_t_ppf(0.975, df=10.0)
+print("normal cutoff:", normal_cutoff)
+print("Student-t cutoff:", t_cutoff)
+print("normal CDF at cutoff:",
+      d.normal_cdf(normal_cutoff))
+\end{verbatim}
+
+\section{API boundaries}
+\verb|mathbr.version| is the version string. \verb|mathbr._RegularizedRegression| is an exposed binding base class for Ridge, Lasso, and ElasticNet; it has no public constructor. Its methods are the inherited regularized methods listed above. This educational library has no formula interface, DataFrame integration, robust covariance, or general result summary yet. For exact signatures and further notes, consult \verb|docs/API_REFERENCE.md| in the source tree.
+
+\end{document}
