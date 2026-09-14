@@ -21,6 +21,19 @@ struct ChiSquareTestResult {
     double p_value;
 };
 
+struct AnovaResult {
+    double statistic;
+    double df_between;
+    double df_within;
+    double p_value;
+};
+
+struct MannWhitneyResult {
+    double statistic;
+    double z_score;
+    double p_value;
+};
+
 TTestResult one_sample_t_test(const std::vector<double>& x, double null_mean = 0.0);
 TTestResult paired_t_test(const std::vector<double>& before,
                           const std::vector<double>& after);
@@ -31,5 +44,11 @@ std::vector<double> benjamini_hochberg_correction(const std::vector<double>& p_v
 ZTestResult proportion_z_test(int successes, int trials, double null_p);
 ChiSquareTestResult chi_square_goodness_of_fit(const std::vector<double>& observed,
                                                 const std::vector<double>& expected);
+AnovaResult one_way_anova(const std::vector<std::vector<double>>& groups);
+ChiSquareTestResult kruskal_wallis(const std::vector<std::vector<double>>& groups);
+ChiSquareTestResult chi_square_independence(
+    const std::vector<std::vector<double>>& table);
+MannWhitneyResult mann_whitney_u(const std::vector<double>& x,
+                                 const std::vector<double>& y);
 
 }  // namespace mathbr::hypothesis

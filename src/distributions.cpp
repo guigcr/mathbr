@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <random>
 
 namespace mathbr::distributions {
 namespace {
@@ -123,6 +124,31 @@ double gamma_regularized_lower(double a, double x) {
             if (std::abs(delta - 1.0) < 4e-15)
                 return std::fmax(0.0, 1.0 - std::exp(log_factor) * h);
         }
+    }
+    throw std::runtime_error("incomplete gamma calculation did not converge");
+}
+
+double gamma_regularized_upper(double a, double x) {
+    if (x <= 0.0) return 1.0;
+    if (x < a + 1.0) return std::fmax(0.0, 1.0 - gamma_regularized_lower(a, x));
+    constexpr double tiny = 1e-300;
+    const double log_factor = a * std::log(x) - x - std::lgamma(a);
+    double b = x + 1.0 - a;
+    double c = 1.0 / tiny;
+    double d = 1.0 / (std::abs(b) < tiny ? tiny : b);
+    double h = d;
+    for (int i = 1; i <= 1000; ++i) {
+        const double an = -i * (i - a);
+        b += 2.0;
+        d = an * d + b;
+        if (std::abs(d) < tiny) d = tiny;
+        c = b + an / c;
+        if (std::abs(c) < tiny) c = tiny;
+        d = 1.0 / d;
+        const double delta = d * c;
+        h *= delta;
+        if (std::abs(delta - 1.0) < 4e-15)
+            return std::fmin(1.0, std::exp(log_factor) * h);
     }
     throw std::runtime_error("incomplete gamma calculation did not converge");
 }
@@ -373,15 +399,230 @@ double binomial_cdf(int k, int n, double p) {
     if (p == 0.0) return 1.0;
     if (p == 1.0) return 0.0;
 
-    // Sum the shorter tail to reduce work and cancellation near probability one.
-    if (k <= n * p) {
-        double total = 0.0;
-        for (int j = 0; j <= k; ++j) total += binomial_mass(j, n, p);
-        return std::fmin(1.0, total);
+    // The binomial CDF is I_{1-p}(n-k, k+1); choose the smaller tail.
+    if (k <= static_cast<double>(n) * p)
+        return std::exp(beta_log_lower(n - k, k + 1.0, 1.0 - p));
+    return -std::expm1(beta_log_lower(k + 1.0, n - k, p));
+}
+
+double binomial_ppf(double q, int n, double p) {
+    validate_probability(q);
+    validate_probability(p);
+    if (n < 0) throw std::invalid_argument("n must be nonnegative");
+    if (q == 0.0 || p == 0.0) return 0.0;
+    if (q == 1.0 || p == 1.0) return n;
+    int lo = -1, hi = n;
+    while (hi - static_cast<long long>(lo) > 1) {
+        const int mid = lo + static_cast<int>((static_cast<long long>(hi) - lo) / 2);
+        if (binomial_cdf(mid, n, p) < q) lo = mid;
+        else hi = mid;
     }
-    double tail = 0.0;
-    for (int j = k + 1; j <= n; ++j) tail += binomial_mass(j, n, p);
-    return std::fmax(0.0, 1.0 - tail);
+    return hi;
+}
+
+double poisson_pmf(int k, double rate) {
+    if (!std::isfinite(rate) || rate < 0.0)
+        throw std::invalid_argument("rate must be finite and nonnegative");
+    if (k < 0) return 0.0;
+    if (rate == 0.0) return k == 0 ? 1.0 : 0.0;
+    return std::exp(k * std::log(rate) - rate - std::lgamma(k + 1.0));
+}
+
+double poisson_cdf(int k, double rate) {
+    if (!std::isfinite(rate) || rate < 0.0)
+        throw std::invalid_argument("rate must be finite and nonnegative");
+    if (k < 0) return 0.0;
+    if (rate == 0.0) return 1.0;
+    return gamma_regularized_upper(k + 1.0, rate);
+}
+
+double poisson_ppf(double q, double rate) {
+    validate_probability(q);
+    if (!std::isfinite(rate) || rate < 0.0)
+        throw std::invalid_argument("rate must be finite and nonnegative");
+    if (q == 0.0 || rate == 0.0) return 0.0;
+    if (q == 1.0) return std::numeric_limits<double>::infinity();
+    const int max_k = std::numeric_limits<int>::max();
+    if (q <= std::exp(-rate)) return 0.0;
+    const double guess = rate + 10.0 * std::sqrt(rate + 1.0);
+    int hi = guess >= max_k ? max_k : std::max(1, static_cast<int>(std::ceil(guess)));
+    while (poisson_cdf(hi, rate) < q && hi < max_k)
+        hi = static_cast<int>(std::min(static_cast<long long>(max_k),
+                                      2LL * hi + 1));
+    if (poisson_cdf(hi, rate) < q)
+        throw std::invalid_argument("quantile exceeds supported integer range");
+    int lo = -1;
+    while (hi - static_cast<long long>(lo) > 1) {
+        const int mid = lo + static_cast<int>((static_cast<long long>(hi) - lo) / 2);
+        if (poisson_cdf(mid, rate) < q) lo = mid;
+        else hi = mid;
+    }
+    return hi;
+}
+
+double negative_binomial_pmf(int k, int successes, double p) {
+    if (successes <= 0 || !std::isfinite(p) || p <= 0.0 || p > 1.0)
+        throw std::invalid_argument("successes must be positive and p in (0, 1]");
+    if (k < 0) return 0.0;
+    if (p == 1.0) return k == 0 ? 1.0 : 0.0;
+    const double log_mass = std::lgamma(static_cast<double>(k) + successes)
+        - std::lgamma(k + 1.0) - std::lgamma(static_cast<double>(successes))
+        + successes * std::log(p) + k * std::log1p(-p);
+    return std::exp(log_mass);
+}
+
+double negative_binomial_cdf(int k, int successes, double p) {
+    if (successes <= 0 || !std::isfinite(p) || p <= 0.0 || p > 1.0)
+        throw std::invalid_argument("successes must be positive and p in (0, 1]");
+    if (k < 0) return 0.0;
+    if (p == 1.0) return 1.0;
+    return std::exp(beta_log_lower(successes, k + 1.0, p));
+}
+
+double negative_binomial_ppf(double q, int successes, double p) {
+    validate_probability(q);
+    if (successes <= 0 || !std::isfinite(p) || p <= 0.0 || p > 1.0)
+        throw std::invalid_argument("successes must be positive and p in (0, 1]");
+    if (q == 0.0 || p == 1.0) return 0.0;
+    if (q == 1.0) return std::numeric_limits<double>::infinity();
+    const int max_k = std::numeric_limits<int>::max();
+    const double mean = successes * ((1.0 - p) / p);
+    const double sd = std::sqrt(successes * (1.0 - p)) / p;
+    const double guess = mean + 10.0 * sd;
+    int hi = !std::isfinite(guess) || guess >= max_k
+        ? max_k : std::max(1, static_cast<int>(std::ceil(guess)));
+    while (negative_binomial_cdf(hi, successes, p) < q && hi < max_k)
+        hi = static_cast<int>(std::min(static_cast<long long>(max_k), 2LL * hi + 1));
+    if (negative_binomial_cdf(hi, successes, p) < q)
+        throw std::invalid_argument("quantile exceeds supported integer range");
+    int lo = -1;
+    while (hi - static_cast<long long>(lo) > 1) {
+        const int mid = lo + static_cast<int>((static_cast<long long>(hi) - lo) / 2);
+        if (negative_binomial_cdf(mid, successes, p) < q) lo = mid;
+        else hi = mid;
+    }
+    return hi;
+}
+
+double multinomial_pmf(const std::vector<int>& counts,
+                       const std::vector<double>& probabilities) {
+    if (counts.empty() || counts.size() != probabilities.size())
+        throw std::invalid_argument("counts and probabilities must be aligned and nonempty");
+    long long trials = 0;
+    long double probability_sum = 0.0;
+    for (size_t i = 0; i < counts.size(); ++i) {
+        if (counts[i] < 0 || !std::isfinite(probabilities[i]) || probabilities[i] < 0.0)
+            throw std::invalid_argument("counts must be nonnegative and probabilities finite");
+        trials += counts[i];
+        probability_sum += probabilities[i];
+    }
+    if (std::abs(probability_sum - 1.0L) > 1e-12L)
+        throw std::invalid_argument("probabilities must sum to one");
+    double log_mass = std::lgamma(static_cast<double>(trials) + 1.0);
+    for (size_t i = 0; i < counts.size(); ++i) {
+        log_mass -= std::lgamma(counts[i] + 1.0);
+        if (counts[i] > 0) {
+            if (probabilities[i] == 0.0) return 0.0;
+            log_mass += counts[i] * std::log(probabilities[i]);
+        }
+    }
+    return std::exp(log_mass);
+}
+
+double poisson_fit(const std::vector<int>& observations) {
+    if (observations.empty()) throw std::invalid_argument("observations must be nonempty");
+    long double total = 0.0;
+    for (int value : observations) {
+        if (value < 0) throw std::invalid_argument("Poisson observations must be nonnegative");
+        total += value;
+    }
+    return static_cast<double>(total / observations.size());
+}
+
+std::vector<int> binomial_sample(std::size_t count, int n, double p, std::uint64_t seed) {
+    validate_probability(p);
+    if (n < 0) throw std::invalid_argument("n must be nonnegative");
+    std::mt19937_64 generator(seed);
+    std::binomial_distribution<int> distribution(n, p);
+    std::vector<int> samples(count);
+    for (int& value : samples) value = distribution(generator);
+    return samples;
+}
+
+std::vector<int> geometric_sample(std::size_t count, double p, std::uint64_t seed) {
+    if (!std::isfinite(p) || p <= 0.0 || p > 1.0)
+        throw std::invalid_argument("p must be in (0, 1]");
+    std::mt19937_64 generator(seed);
+    std::geometric_distribution<int> distribution(p);
+    std::vector<int> samples(count);
+    for (int& value : samples) {
+        const int failures = distribution(generator);
+        if (failures == std::numeric_limits<int>::max())
+            throw std::overflow_error("geometric sample exceeds integer range");
+        value = failures + 1;
+    }
+    return samples;
+}
+
+std::vector<int> poisson_sample(std::size_t count, double rate, std::uint64_t seed) {
+    if (!std::isfinite(rate) || rate < 0.0 || rate > std::numeric_limits<int>::max())
+        throw std::invalid_argument("rate must be finite, nonnegative, and within integer range");
+    std::mt19937_64 generator(seed);
+    std::poisson_distribution<int> distribution(rate);
+    std::vector<int> samples(count);
+    for (int& value : samples) value = distribution(generator);
+    return samples;
+}
+
+std::vector<int> negative_binomial_sample(std::size_t count, int successes,
+                                          double p, std::uint64_t seed) {
+    if (successes <= 0 || !std::isfinite(p) || p <= 0.0 || p > 1.0)
+        throw std::invalid_argument("successes must be positive and p in (0, 1]");
+    std::mt19937_64 generator(seed);
+    std::negative_binomial_distribution<int> distribution(successes, p);
+    std::vector<int> samples(count);
+    for (int& value : samples) value = distribution(generator);
+    return samples;
+}
+
+std::vector<int> multinomial_sample(int trials,
+                                    const std::vector<double>& probabilities,
+                                    std::uint64_t seed) {
+    if (trials < 0 || probabilities.empty())
+        throw std::invalid_argument("trials must be nonnegative and probabilities nonempty");
+    long double total = 0.0;
+    for (double value : probabilities) {
+        if (!std::isfinite(value) || value < 0.0)
+            throw std::invalid_argument("probabilities must be finite and nonnegative");
+        total += value;
+    }
+    if (std::abs(total - 1.0L) > 1e-12L)
+        throw std::invalid_argument("probabilities must sum to one");
+    std::mt19937_64 generator(seed);
+    std::discrete_distribution<std::size_t> distribution(probabilities.begin(),
+                                                         probabilities.end());
+    std::vector<int> counts(probabilities.size(), 0);
+    for (int i = 0; i < trials; ++i) ++counts[distribution(generator)];
+    return counts;
+}
+
+std::vector<int> bernoulli_sample(std::size_t count, double p, std::uint64_t seed) {
+    validate_probability(p);
+    std::mt19937_64 generator(seed);
+    std::bernoulli_distribution distribution(p);
+    std::vector<int> samples(count);
+    for (int& value : samples) value = distribution(generator) ? 1 : 0;
+    return samples;
+}
+
+std::vector<int> discrete_uniform_sample(std::size_t count, int a, int b,
+                                         std::uint64_t seed) {
+    if (a > b) throw std::invalid_argument("a must not exceed b");
+    std::mt19937_64 generator(seed);
+    std::uniform_int_distribution<int> distribution(a, b);
+    std::vector<int> samples(count);
+    for (int& value : samples) value = distribution(generator);
+    return samples;
 }
 
 double gamma_pdf(double x, double shape, double scale) {

@@ -18,6 +18,7 @@
 #include "mathbr/time_series_diagnostics.hpp"
 #include "mathbr/survival.hpp"
 #include "mathbr/bayesian.hpp"
+#include "mathbr/multivariate.hpp"
 
 namespace py = pybind11;
 
@@ -334,6 +335,19 @@ PYBIND11_MODULE(mathbr, m) {
     m.attr("version") = "0.6.0";
 
     py::module_ distributions = m.def_submodule("distributions", "Probability distributions");
+    py::class_<mathbr::multivariate::MultivariateNormal>(distributions, "MultivariateNormal")
+        .def(py::init<const std::vector<double>&, const std::vector<std::vector<double>>&>(),
+             py::arg("mean"), py::arg("covariance"))
+        .def("logpdf", &mathbr::multivariate::MultivariateNormal::logpdf, py::arg("x"))
+        .def("pdf", &mathbr::multivariate::MultivariateNormal::pdf, py::arg("x"))
+        .def("mahalanobis_distance", &mathbr::multivariate::MultivariateNormal::mahalanobis_distance,
+             py::arg("x"))
+        .def("logpdf_batch", &mathbr::multivariate::MultivariateNormal::logpdf_batch,
+             py::arg("data"))
+        .def("pdf_batch", &mathbr::multivariate::MultivariateNormal::pdf_batch,
+             py::arg("data"))
+        .def("sample", &mathbr::multivariate::MultivariateNormal::sample,
+             py::arg("count"), py::arg("seed"));
     distributions.def("normal_pdf", &mathbr::distributions::normal_pdf, py::arg("x"));
     distributions.def("normal_logpdf", &mathbr::distributions::normal_logpdf, py::arg("x"));
     distributions.def("normal_cdf", &mathbr::distributions::normal_cdf, py::arg("x"));
@@ -387,6 +401,72 @@ PYBIND11_MODULE(mathbr, m) {
                       py::arg("k"), py::arg("n"), py::arg("p"));
     distributions.def("binomial_cdf", &mathbr::distributions::binomial_cdf,
                       py::arg("k"), py::arg("n"), py::arg("p"));
+    distributions.def("binomial_ppf", &mathbr::distributions::binomial_ppf,
+                      py::arg("q"), py::arg("n"), py::arg("p"));
+    distributions.def("poisson_pmf", &mathbr::distributions::poisson_pmf,
+                      py::arg("k"), py::arg("rate"));
+    distributions.def("poisson_cdf", &mathbr::distributions::poisson_cdf,
+                      py::arg("k"), py::arg("rate"));
+    distributions.def("poisson_ppf", &mathbr::distributions::poisson_ppf,
+                      py::arg("q"), py::arg("rate"));
+    distributions.def("negative_binomial_pmf", &mathbr::distributions::negative_binomial_pmf,
+                      py::arg("k"), py::arg("successes"), py::arg("p"));
+    distributions.def("negative_binomial_cdf", &mathbr::distributions::negative_binomial_cdf,
+                      py::arg("k"), py::arg("successes"), py::arg("p"));
+    distributions.def("negative_binomial_ppf", &mathbr::distributions::negative_binomial_ppf,
+                      py::arg("q"), py::arg("successes"), py::arg("p"));
+    distributions.def("multinomial_pmf", &mathbr::distributions::multinomial_pmf,
+                      py::arg("counts"), py::arg("probabilities"));
+    distributions.def("binomial_sample", &mathbr::distributions::binomial_sample,
+                      py::arg("count"), py::arg("n"), py::arg("p"), py::arg("seed"));
+    distributions.def("geometric_sample", &mathbr::distributions::geometric_sample,
+                      py::arg("count"), py::arg("p"), py::arg("seed"));
+    distributions.def("poisson_sample", &mathbr::distributions::poisson_sample,
+                      py::arg("count"), py::arg("rate"), py::arg("seed"));
+    distributions.def("negative_binomial_sample", &mathbr::distributions::negative_binomial_sample,
+                      py::arg("count"), py::arg("successes"), py::arg("p"), py::arg("seed"));
+    distributions.def("multinomial_sample", &mathbr::distributions::multinomial_sample,
+                      py::arg("trials"), py::arg("probabilities"), py::arg("seed"));
+    distributions.def("bernoulli_sample", &mathbr::distributions::bernoulli_sample,
+                      py::arg("count"), py::arg("p"), py::arg("seed"));
+    distributions.def("discrete_uniform_sample", &mathbr::distributions::discrete_uniform_sample,
+                      py::arg("count"), py::arg("a"), py::arg("b"), py::arg("seed"));
+    distributions.def("normal_sample", &mathbr::distributions::normal_sample,
+                      py::arg("count"), py::arg("seed"));
+    distributions.def("student_t_sample", &mathbr::distributions::student_t_sample,
+                      py::arg("count"), py::arg("df"), py::arg("seed"));
+    distributions.def("chi_square_sample", &mathbr::distributions::chi_square_sample,
+                      py::arg("count"), py::arg("df"), py::arg("seed"));
+    distributions.def("f_sample", &mathbr::distributions::f_sample,
+                      py::arg("count"), py::arg("df1"), py::arg("df2"), py::arg("seed"));
+    distributions.def("uniform_sample", &mathbr::distributions::uniform_sample,
+                      py::arg("count"), py::arg("a"), py::arg("b"), py::arg("seed"));
+    distributions.def("exponential_sample", &mathbr::distributions::exponential_sample,
+                      py::arg("count"), py::arg("rate"), py::arg("seed"));
+    distributions.def("gamma_sample", &mathbr::distributions::gamma_sample,
+                      py::arg("count"), py::arg("shape"), py::arg("scale"), py::arg("seed"));
+    distributions.def("weibull_sample", &mathbr::distributions::weibull_sample,
+                      py::arg("count"), py::arg("shape"), py::arg("scale"), py::arg("seed"));
+    distributions.def("cauchy_sample", &mathbr::distributions::cauchy_sample,
+                      py::arg("count"), py::arg("location"), py::arg("scale"), py::arg("seed"));
+    distributions.def("lognormal_sample", &mathbr::distributions::lognormal_sample,
+                      py::arg("count"), py::arg("mu"), py::arg("sigma"), py::arg("seed"));
+    distributions.def("laplace_sample", &mathbr::distributions::laplace_sample,
+                      py::arg("count"), py::arg("location"), py::arg("scale"), py::arg("seed"));
+    distributions.def("beta_sample", &mathbr::distributions::beta_sample,
+                      py::arg("count"), py::arg("alpha"), py::arg("beta"), py::arg("seed"));
+    distributions.def("geometric_pmf", &mathbr::distributions::geometric_pmf,
+                      py::arg("k"), py::arg("p"));
+    distributions.def("geometric_cdf", &mathbr::distributions::geometric_cdf,
+                      py::arg("k"), py::arg("p"));
+    distributions.def("geometric_ppf", &mathbr::distributions::geometric_ppf,
+                      py::arg("q"), py::arg("p"));
+    distributions.def("discrete_uniform_pmf", &mathbr::distributions::discrete_uniform_pmf,
+                      py::arg("k"), py::arg("a"), py::arg("b"));
+    distributions.def("discrete_uniform_cdf", &mathbr::distributions::discrete_uniform_cdf,
+                      py::arg("k"), py::arg("a"), py::arg("b"));
+    distributions.def("discrete_uniform_ppf", &mathbr::distributions::discrete_uniform_ppf,
+                      py::arg("q"), py::arg("a"), py::arg("b"));
     distributions.def("exponential_pdf", &mathbr::distributions::exponential_pdf,
                       py::arg("x"), py::arg("rate"));
     distributions.def("exponential_cdf", &mathbr::distributions::exponential_cdf,
@@ -429,8 +509,30 @@ PYBIND11_MODULE(mathbr, m) {
                       py::arg("x"), py::arg("alpha"), py::arg("beta"));
     distributions.def("beta_ppf", &mathbr::distributions::beta_ppf,
                       py::arg("p"), py::arg("alpha"), py::arg("beta"));
+    distributions.def("pareto_pdf", &mathbr::distributions::pareto_pdf,
+                      py::arg("x"), py::arg("shape"), py::arg("scale"));
+    distributions.def("pareto_cdf", &mathbr::distributions::pareto_cdf,
+                      py::arg("x"), py::arg("shape"), py::arg("scale"));
+    distributions.def("pareto_ppf", &mathbr::distributions::pareto_ppf,
+                      py::arg("p"), py::arg("shape"), py::arg("scale"));
+    distributions.def("pareto_sample", &mathbr::distributions::pareto_sample,
+                      py::arg("count"), py::arg("shape"), py::arg("scale"), py::arg("seed"));
+    distributions.def("dirichlet_logpdf", &mathbr::distributions::dirichlet_logpdf,
+                      py::arg("x"), py::arg("alpha"));
+    distributions.def("dirichlet_pdf", &mathbr::distributions::dirichlet_pdf,
+                      py::arg("x"), py::arg("alpha"));
+    distributions.def("dirichlet_sample", &mathbr::distributions::dirichlet_sample,
+                      py::arg("count"), py::arg("alpha"), py::arg("seed"));
+    distributions.def("normal_fit", &mathbr::distributions::normal_fit,
+                      py::arg("observations"));
+    distributions.def("exponential_fit", &mathbr::distributions::exponential_fit,
+                      py::arg("observations"));
+    distributions.def("poisson_fit", &mathbr::distributions::poisson_fit,
+                      py::arg("observations"));
 
     py::module_ statistics = m.def_submodule("statistics", "Descriptive statistics");
+    statistics.def("mahalanobis_distance", &mathbr::multivariate::mahalanobis_distance,
+                   py::arg("x"), py::arg("mean"), py::arg("covariance"));
     statistics.def("mean", &mathbr::statistics::mean, py::arg("x"));
     statistics.def("median", &mathbr::statistics::median, py::arg("x"));
     statistics.def("mode", &mathbr::statistics::mode, py::arg("x"));
@@ -451,7 +553,21 @@ PYBIND11_MODULE(mathbr, m) {
     statistics.def("pearson_correlation", &mathbr::statistics::pearson_correlation,
                    py::arg("x"), py::arg("y"));
     statistics.def("spearman_correlation", &mathbr::statistics::spearman_correlation,
+                  py::arg("x"), py::arg("y"));
+    statistics.def("kendall_tau", &mathbr::statistics::kendall_tau,
                    py::arg("x"), py::arg("y"));
+    statistics.def("covariance_matrix", &mathbr::statistics::covariance_matrix,
+                   py::arg("data"), py::arg("ddof") = 1);
+    statistics.def("correlation_matrix", &mathbr::statistics::correlation_matrix,
+                   py::arg("data"));
+    statistics.def("spearman_correlation_matrix", &mathbr::statistics::spearman_correlation_matrix,
+                   py::arg("data"));
+    statistics.def("kendall_correlation_matrix", &mathbr::statistics::kendall_correlation_matrix,
+                   py::arg("data"));
+    statistics.def("weighted_covariance_matrix", &mathbr::statistics::weighted_covariance_matrix,
+                   py::arg("data"), py::arg("weights"));
+    statistics.def("weighted_correlation_matrix", &mathbr::statistics::weighted_correlation_matrix,
+                   py::arg("data"), py::arg("weights"));
     statistics.def("weighted_mean", &mathbr::statistics::weighted_mean,
                    py::arg("x"), py::arg("weights"));
     statistics.def("weighted_variance", &mathbr::statistics::weighted_variance,
@@ -463,6 +579,10 @@ PYBIND11_MODULE(mathbr, m) {
     statistics.def("weighted_quantile", &mathbr::statistics::weighted_quantile,
                    py::arg("x"), py::arg("weights"), py::arg("p"));
     statistics.def("log_sum_exp", &mathbr::statistics::log_sum_exp, py::arg("x"));
+    statistics.def("log_empirical_mgf", &mathbr::statistics::log_empirical_mgf,
+                   py::arg("x"), py::arg("t"));
+    statistics.def("empirical_mgf", &mathbr::statistics::empirical_mgf,
+                   py::arg("x"), py::arg("t"));
 
     py::module_ hypothesis = m.def_submodule("hypothesis", "Classical hypothesis tests");
     py::class_<mathbr::hypothesis::TTestResult>(hypothesis, "TTestResult")
@@ -477,6 +597,15 @@ PYBIND11_MODULE(mathbr, m) {
         .def_readonly("degrees_of_freedom",
                       &mathbr::hypothesis::ChiSquareTestResult::degrees_of_freedom)
         .def_readonly("p_value", &mathbr::hypothesis::ChiSquareTestResult::p_value);
+    py::class_<mathbr::hypothesis::AnovaResult>(hypothesis, "AnovaResult")
+        .def_readonly("statistic", &mathbr::hypothesis::AnovaResult::statistic)
+        .def_readonly("df_between", &mathbr::hypothesis::AnovaResult::df_between)
+        .def_readonly("df_within", &mathbr::hypothesis::AnovaResult::df_within)
+        .def_readonly("p_value", &mathbr::hypothesis::AnovaResult::p_value);
+    py::class_<mathbr::hypothesis::MannWhitneyResult>(hypothesis, "MannWhitneyResult")
+        .def_readonly("statistic", &mathbr::hypothesis::MannWhitneyResult::statistic)
+        .def_readonly("z_score", &mathbr::hypothesis::MannWhitneyResult::z_score)
+        .def_readonly("p_value", &mathbr::hypothesis::MannWhitneyResult::p_value);
     hypothesis.def("one_sample_t_test", &mathbr::hypothesis::one_sample_t_test,
                    py::arg("x"), py::arg("null_mean") = 0.0);
     hypothesis.def("paired_t_test", &mathbr::hypothesis::paired_t_test,
@@ -495,6 +624,14 @@ PYBIND11_MODULE(mathbr, m) {
     hypothesis.def("chi_square_goodness_of_fit",
                    &mathbr::hypothesis::chi_square_goodness_of_fit,
                    py::arg("observed"), py::arg("expected"));
+    hypothesis.def("one_way_anova", &mathbr::hypothesis::one_way_anova,
+                   py::arg("groups"));
+    hypothesis.def("kruskal_wallis", &mathbr::hypothesis::kruskal_wallis,
+                   py::arg("groups"));
+    hypothesis.def("chi_square_independence", &mathbr::hypothesis::chi_square_independence,
+                   py::arg("table"));
+    hypothesis.def("mann_whitney_u", &mathbr::hypothesis::mann_whitney_u,
+                   py::arg("x"), py::arg("y"));
 
     py::module_ evaluation = m.def_submodule("evaluation", "Binary classification evaluation");
     py::class_<mathbr::evaluation::RocCurve>(evaluation, "RocCurve")

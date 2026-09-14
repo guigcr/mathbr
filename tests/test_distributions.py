@@ -90,6 +90,8 @@ def test_bernoulli_and_binomial_reference_values():
     assert normal.bernoulli_cdf(0, 0.3) == pytest.approx(0.7)
     assert normal.binomial_pmf(2, 4, 0.5) == pytest.approx(0.375)
     assert normal.binomial_cdf(2, 4, 0.5) == pytest.approx(0.6875)
+    assert normal.binomial_ppf(0.6875, 4, 0.5) == 2
+    assert normal.binomial_ppf(0.6875001, 4, 0.5) == 3
     assert normal.binomial_pmf(-1, 4, 0.5) == 0.0
     assert normal.binomial_cdf(-1, 4, 0.5) == 0.0
     assert normal.binomial_cdf(4, 4, 0.5) == 1.0
@@ -105,6 +107,15 @@ def test_binomial_normalization_and_cdf_consistency():
         for k, mass in enumerate(masses):
             cumulative += mass
             assert normal.binomial_cdf(k, n, p) == pytest.approx(cumulative, abs=1e-12)
+
+
+def test_binomial_quantile_contract():
+    for n, p in ((0, 0.3), (10, 0.2), (50, 0.7), (1000, 0.5)):
+        for q in (0, 0.01, 0.2, 0.5, 0.9, 1):
+            k = int(normal.binomial_ppf(q, n, p))
+            assert normal.binomial_cdf(k, n, p) >= q
+            if k > 0 and 0 < q < 1:
+                assert normal.binomial_cdf(k - 1, n, p) < q
 
 
 @pytest.mark.parametrize("p", [-0.1, 1.1, math.nan, math.inf])

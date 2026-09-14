@@ -105,7 +105,77 @@ Bernoulli and Binomial accept integer `k` and finite success probability `p` in 
 | `mathbr.distributions.bernoulli_pmf(k, p)` | Probability of integer outcome `k` for one trial. | Probability mass as float. | `ValueError` for invalid `p`. | One binary trial. | `mathbr.distributions.bernoulli_pmf(1, 0.3)` |
 | `mathbr.distributions.bernoulli_cdf(k, p)` | Cumulative probability through integer `k`. | Probability as float. | `ValueError` for invalid `p`. | One binary trial. | `mathbr.distributions.bernoulli_cdf(0, 0.3)` |
 | `mathbr.distributions.binomial_pmf(k, n, p)` | Probability of `k` successes in `n` trials. | Probability mass as float. | `ValueError` for invalid `n` or `p`. | Independent trials with common `p`; extreme masses may underflow. | `mathbr.distributions.binomial_pmf(2, 4, 0.5)` |
-| `mathbr.distributions.binomial_cdf(k, n, p)` | Cumulative probability through `k` successes. | Probability as float. | `ValueError` for invalid `n` or `p`. | Direct tail summation costs O(n) in the worst case. | `mathbr.distributions.binomial_cdf(2, 4, 0.5)` |
+| `mathbr.distributions.binomial_cdf(k, n, p)` | Cumulative probability through `k` successes. | Probability as float. | `ValueError` for invalid `n` or `p`. | Regularized incomplete beta calculation avoids O(n) tail summation; iteration is bounded at 1000 steps. | `mathbr.distributions.binomial_cdf(2, 4, 0.5)` |
+| `mathbr.distributions.binomial_ppf(q, n, p)` | Smallest success count with CDF at least `q`. | Integer-valued float. | `ValueError` for invalid `q`, `n`, or `p`. | Binary search uses O(log n) incomplete-beta evaluations. | `mathbr.distributions.binomial_ppf(0.5, 4, 0.5)` |
+
+Poisson takes finite nonnegative `rate`. PMF and CDF accept integer `k`, return zero below support, and use a log-gamma mass and regularized upper incomplete gamma CDF respectively. `poisson_ppf(q, rate)` accepts `q` in `[0,1]`, returns the smallest integer attaining that CDF, and uses binary search; at `q=1` it returns infinity unless `rate=0`. A quantile beyond the supported 32-bit integer range raises `ValueError`. The numerical incomplete-gamma iteration is bounded at 1000 steps.
+
+| Signature | Returns | Example |
+| --- | --- | --- |
+| `poisson_pmf(k, rate)` | Probability mass. | `mathbr.distributions.poisson_pmf(2, 4)` |
+| `poisson_cdf(k, rate)` | Cumulative probability through `k`. | `mathbr.distributions.poisson_cdf(2, 4)` |
+| `poisson_ppf(q, rate)` | Smallest integer with CDF at least `q`. | `mathbr.distributions.poisson_ppf(0.5, 4)` |
+
+The negative binomial functions count failures `k` before a positive integer number of `successes`, with independent success probability `p` in `(0,1]`. The PMF uses log-gamma coefficients; the CDF uses the regularized incomplete beta function. The PPF takes `q` in `[0,1]` and finds the first failure count whose CDF reaches `q` using an adaptive bracket and binary search. It returns infinity at `q=1` when `p<1`; quantiles beyond the supported 32-bit integer range raise `ValueError`.
+
+| Signature | Returns | Example |
+| --- | --- | --- |
+| `negative_binomial_pmf(k, successes, p)` | Probability mass at `k` failures. | `mathbr.distributions.negative_binomial_pmf(2, 3, 0.5)` |
+| `negative_binomial_cdf(k, successes, p)` | Cumulative probability through `k` failures. | `mathbr.distributions.negative_binomial_cdf(2, 3, 0.5)` |
+| `negative_binomial_ppf(q, successes, p)` | Smallest failure count attaining `q`. | `mathbr.distributions.negative_binomial_ppf(0.5, 3, 0.5)` |
+| `multinomial_pmf(counts, probabilities)` | Joint probability of category counts. | `mathbr.distributions.multinomial_pmf([1, 1, 1], [0.2, 0.3, 0.5])` |
+
+`multinomial_pmf` requires nonempty aligned vectors, nonnegative integer counts, finite nonnegative probabilities summing to one within `1e-12`, and uses a log-gamma coefficient. A positive count in a zero-probability category has mass zero. It runs in O(categories) time. A multivariate CDF/PPF is not defined by this API.
+
+`binomial_sample(count, n, p, seed)`, `geometric_sample(count, p, seed)`, `poisson_sample(count, rate, seed)`, and `negative_binomial_sample(count, successes, p, seed)` return integer lists. They use a local C++ Mersenne Twister generator and standard-library distributions, so the same seed and parameters reproduce the sequence on the same C++ implementation; exact streams may differ across platforms or compiler libraries. Sampling runs in O(count) output work, with distribution-specific draw cost. Geometric samples count the success trial starting at 1; negative-binomial samples count failures. `count=0` returns an empty list. Invalid distribution parameters raise `ValueError`; Poisson sampling requires a rate within the supported integer range.
+`multinomial_sample(trials, probabilities, seed)` returns one integer count per category. It validates nonnegative `trials` and the same probability rules as `multinomial_pmf`, initializes a categorical distribution once, and performs `trials` draws with a local seeded generator. The returned counts sum to `trials`; `trials=0` returns zeros. Exact seeded streams depend on the C++ standard-library implementation.
+`bernoulli_sample(count, p, seed)` returns zero/one draws for `p` in `[0,1]`. `discrete_uniform_sample(count, a, b, seed)` returns integers on the inclusive range `a` through `b`. Both use one local seeded generator per batch and validate parameters even when `count=0`.
+
+The following continuous samplers return lists of finite floats. Each call seeds a local Mersenne Twister generator and initializes one C++ standard-library distribution for the whole batch. Same-seed sequences reproduce on the same C++ implementation, but exact streams may differ across platforms. `count=0` returns an empty list after parameter validation. Invalid or nonfinite parameters raise `ValueError`; a nonfinite generated value raises `OverflowError`. The output work is O(count), with draw cost determined by the distribution implementation.
+
+| Signature | Parameters | Example |
+| --- | --- | --- |
+| `normal_sample(count, seed)` | Standard normal. | `mathbr.distributions.normal_sample(5, 42)` |
+| `student_t_sample(count, df, seed)` | Positive degrees of freedom. | `mathbr.distributions.student_t_sample(5, 5, 42)` |
+| `chi_square_sample(count, df, seed)` | Positive degrees of freedom. | `mathbr.distributions.chi_square_sample(5, 4, 42)` |
+| `f_sample(count, df1, df2, seed)` | Two positive degrees of freedom. | `mathbr.distributions.f_sample(5, 4, 8, 42)` |
+| `uniform_sample(count, a, b, seed)` | Finite bounds with `a < b` and finite width. | `mathbr.distributions.uniform_sample(5, -1, 1, 42)` |
+| `exponential_sample(count, rate, seed)` | Positive rate. | `mathbr.distributions.exponential_sample(5, 2, 42)` |
+| `gamma_sample(count, shape, scale, seed)` | Positive shape and scale. | `mathbr.distributions.gamma_sample(5, 2, 3, 42)` |
+| `weibull_sample(count, shape, scale, seed)` | Positive shape and scale. | `mathbr.distributions.weibull_sample(5, 2, 3, 42)` |
+| `cauchy_sample(count, location, scale, seed)` | Finite location, positive scale. | `mathbr.distributions.cauchy_sample(5, 0, 1, 42)` |
+| `lognormal_sample(count, mu, sigma, seed)` | Finite underlying-normal mean, positive standard deviation. | `mathbr.distributions.lognormal_sample(5, 0, 1, 42)` |
+| `laplace_sample(count, location, scale, seed)` | Finite location, positive scale; exponential magnitude and random sign. | `mathbr.distributions.laplace_sample(5, 0, 1, 42)` |
+| `beta_sample(count, alpha, beta, seed)` | Positive shapes; ratio of independent gamma variates. | `mathbr.distributions.beta_sample(5, 2, 3, 42)` |
+
+`beta_sample` scales both gamma variates by their maximum before forming the ratio, avoiding overflow in their sum. It raises `OverflowError` if both generated variates underflow to zero or are nonfinite at extreme shape parameters.
+
+`pareto_pdf(x, shape, scale)`, `pareto_cdf(x, shape, scale)`, and `pareto_ppf(p, shape, scale)` implement Pareto type I with positive shape and lower support bound `scale`. The density is `shape * scale**shape / x**(shape+1)` for `x >= scale`; CDF and PPF use stable exponential/logarithm forms. The PPF returns `scale` at `p=0` and infinity at `p=1`. `pareto_sample(count, shape, scale, seed)` generates a batch using exponential log-ratios and a local seeded generator; nonfinite draws raise `OverflowError`.
+
+`dirichlet_logpdf(x, alpha)` and `dirichlet_pdf(x, alpha)` evaluate the interior-simplex Dirichlet density in O(categories) time. Both vectors must have the same length of at least two, every `x_i` and `alpha_i` must be finite and positive, and `x` must sum to one within `1e-12`. Boundary-simplex points are excluded because their density may be zero, finite, or infinite depending on `alpha`. `dirichlet_sample(count, alpha, seed)` returns one simplex row per draw by normalizing independent gamma variates, scaling by their maximum first to avoid overflow in the sum. Extreme gamma underflow or overflow raises `OverflowError`. Equal seeds reproduce samples on the same C++ standard-library implementation.
+
+Closed-form maximum-likelihood fitting is available for three families, each in O(n) time and O(1) auxiliary memory:
+
+| Signature | Returns | Rules |
+| --- | --- | --- |
+| `normal_fit(observations)` | `[mean, sigma]`, with population-denominator MLE sigma. | Nonempty finite and varying observations; no degrees-of-freedom correction. |
+| `exponential_fit(observations)` | Rate `1 / sample_mean`. | Nonempty finite nonnegative observations with positive finite mean. |
+| `poisson_fit(observations)` | Mean count, including zero for all-zero data. | Nonempty nonnegative integer observations. |
+
+`mathbr.distributions.MultivariateNormal(mean, covariance)` represents a multivariate normal distribution with finite mean and finite symmetric positive-definite covariance. The constructor validates dimensions and computes a Cholesky factor in O(p³) time, retaining it for repeated calls. `logpdf(x)`, `pdf(x)`, and `mahalanobis_distance(x)` each cost O(p²), using triangular solves rather than a matrix inverse. `logpdf_batch(data)` and `pdf_batch(data)` accept rows and reuse both the factor and a scratch vector, costing O(n p²) for n rows; an empty batch returns an empty list. `sample(count, seed)` returns a row-major list of draws using the same cached factor and a local seeded generator, costing O(count × p²). Wrong dimensions, nonfinite values, nonsymmetric covariance, and covariance that is not positive definite raise `ValueError`. Nonfinite generated draws raise `OverflowError`. Exact seeded streams can differ across C++ standard-library implementations.
+
+`mathbr.statistics.mahalanobis_distance(x, mean, covariance)` is a convenience scalar function with the same validation and distance definition. It factors the covariance for each call; use a cached `MultivariateNormal` object for repeated distances. Example: `mathbr.distributions.MultivariateNormal([0, 0], [[1, 0], [0, 1]]).logpdf([1, 2])`.
+
+`geometric_pmf/cdf/ppf` use the trial number of the first success, so support starts at 1. The success probability `p` lies in `(0,1]`; PMF and CDF take integer `k`, and PPF takes `q` in `[0,1]`. The PPF returns 1 at `q=0` and infinity at `q=1` unless `p=1`. `discrete_uniform_pmf/cdf/ppf` use inclusive integer bounds `a <= b`; the PPF returns the smallest supported integer with CDF at least `q`. Both families use O(1) formulas, apart from a small boundary correction in the geometric PPF.
+
+| Signature | Returns | Example |
+| --- | --- | --- |
+| `geometric_pmf(k, p)` | Probability of first success on trial `k`. | `mathbr.distributions.geometric_pmf(3, 0.25)` |
+| `geometric_cdf(k, p)` | Probability of first success by trial `k`. | `mathbr.distributions.geometric_cdf(3, 0.25)` |
+| `geometric_ppf(q, p)` | Smallest trial number reaching cumulative probability `q`. | `mathbr.distributions.geometric_ppf(0.5, 0.25)` |
+| `discrete_uniform_pmf(k, a, b)` | Probability mass at integer `k`. | `mathbr.distributions.discrete_uniform_pmf(2, 1, 3)` |
+| `discrete_uniform_cdf(k, a, b)` | Cumulative probability through integer `k`. | `mathbr.distributions.discrete_uniform_cdf(2, 1, 3)` |
+| `discrete_uniform_ppf(q, a, b)` | Smallest integer reaching cumulative probability `q`. | `mathbr.distributions.discrete_uniform_ppf(0.5, 1, 3)` |
 
 `exponential_pdf/cdf/ppf` take a positive `rate`. `weibull_pdf/cdf/ppf` take positive `shape` and `scale`. `laplace_pdf/cdf/ppf` and `cauchy_pdf/cdf/ppf` take finite `location` and positive `scale`. `lognormal_pdf/cdf/ppf` take finite `mu` and positive `sigma` for the underlying normal. PDF/CDF calls take finite `x`, PPF calls take `p` in `[0,1]`, and invalid parameters raise `ValueError`. Boundary quantiles return the support endpoints, including infinity when appropriate. Weibull density at zero is infinite for shape below one.
 
@@ -140,6 +210,13 @@ The functions in `mathbr.statistics` accept nonempty finite numeric sequences. I
 | `mathbr.statistics.covariance(x, y, ddof=1)` | Paired centered cross-product divided by `n-ddof`. | Float. | Equal lengths and valid `ddof` required. | `mathbr.statistics.covariance([1, 2], [2, 4])` |
 | `mathbr.statistics.pearson_correlation(x, y)` | Pearson linear correlation. | Float. | Requires equal lengths and positive variance in both sequences. | `mathbr.statistics.pearson_correlation([1, 2], [2, 4])` |
 | `mathbr.statistics.spearman_correlation(x, y)` | Pearson correlation of average ranks, including ties. | Float. | Requires equal lengths and variation in both rank vectors; O(n log n) sorting. | `mathbr.statistics.spearman_correlation([1, 2], [2, 4])` |
+| `mathbr.statistics.kendall_tau(x, y)` | Kendall tau-b rank correlation, adjusting for ties in either sequence. | Float. | Requires equal-length finite vectors varying in both coordinates; O(n log n) time and O(n) memory. | `mathbr.statistics.kendall_tau([1, 2, 3], [3, 2, 1])` |
+| `mathbr.statistics.covariance_matrix(data, ddof=1)` | Symmetric covariance matrix for row-major observations. | Square nested list of floats. | Finite rectangular nonempty matrix; `ddof` in `[0, rows)`. O(rows × columns²) time. | `mathbr.statistics.covariance_matrix([[1, 2], [2, 4]])` |
+| `mathbr.statistics.correlation_matrix(data)` | Pearson correlation matrix for row-major observations. | Square nested list of floats. | Every column must vary; O(rows × columns²) time. | `mathbr.statistics.correlation_matrix([[1, 2], [2, 4]])` |
+| `mathbr.statistics.spearman_correlation_matrix(data)` | Pearson correlation matrix of average-tie ranks. | Square nested list of floats. | Every column must vary; O(columns × rows log rows + rows × columns²) time. | `mathbr.statistics.spearman_correlation_matrix([[1, 2], [2, 4]])` |
+| `mathbr.statistics.kendall_correlation_matrix(data)` | Kendall tau-b for every pair of columns. | Square nested list of floats. | Every column must vary; O(columns² × rows log rows) time. | `mathbr.statistics.kendall_correlation_matrix([[1, 2], [2, 4]])` |
+| `mathbr.statistics.weighted_covariance_matrix(data, weights)` | Population covariance matrix with one positive weight per row. | Square nested list of floats. | Finite rectangular data and positive finite weights with finite sum; O(rows × columns²) time. | `mathbr.statistics.weighted_covariance_matrix([[1, 2], [2, 4]], [1, 3])` |
+| `mathbr.statistics.weighted_correlation_matrix(data, weights)` | Pearson correlation matrix using the same weighted covariance. | Square nested list of floats. | Same weight rules; every column must vary. O(rows × columns²) time. | `mathbr.statistics.weighted_correlation_matrix([[1, 2], [2, 4]], [1, 3])` |
 | `mathbr.statistics.weighted_mean(x, weights)` | Mean with strictly positive finite weights. | Float. | Equal lengths and finite weight sum required. | `mathbr.statistics.weighted_mean([0, 2], [1, 3])` |
 | `mathbr.statistics.weighted_variance(x, weights)` | Weighted population variance. | Float. | Same weight rules; no unbiased correction. | `mathbr.statistics.weighted_variance([0, 2], [1, 3])` |
 | `mathbr.statistics.weighted_covariance(x, y, weights)` | Weighted population covariance. | Float. | Aligned sequences and valid weights required. | `mathbr.statistics.weighted_covariance([0, 2], [1, 5], [1, 3])` |
@@ -168,6 +245,14 @@ Multiple-comparison functions take a nonempty sequence `p_values` of finite prob
 `proportion_z_test(successes, trials, null_p)` tests a single binomial proportion against a null probability. Its `ZTestResult` has read-only float `statistic` and two-sided `p_value`. Counts must be integers with `0 <= successes <= trials`, `trials > 0`, and finite `null_p` in (0, 1). It requires at least five expected successes and failures under the null; otherwise it raises `ValueError`. The normal approximation is still an approximation, not an exact binomial test. Example: `mathbr.hypothesis.proportion_z_test(60, 100, 0.5)`.
 
 `chi_square_goodness_of_fit(observed, expected)` compares aligned nonnegative observed bin counts with strictly positive expected counts. The totals must match, and there must be at least two bins. It returns a `ChiSquareTestResult` with read-only float `statistic`, `degrees_of_freedom`, and `p_value`. Invalid counts raise `ValueError`. This uses `k-1` degrees of freedom and assumes no parameters were estimated from the data; small expected bin counts can make the chi-squared approximation unreliable. Example: `mathbr.hypothesis.chi_square_goodness_of_fit([10, 20, 30], [20, 20, 20])`.
+
+`one_way_anova(groups)` accepts at least two nonempty finite groups, with total observation count greater than the group count and positive pooled within-group variation. It returns `AnovaResult` with read-only `statistic`, `df_between`, `df_within`, and `p_value`. The F statistic compares between-group and within-group mean squares; its reference p-value assumes independent Gaussian observations with equal variances. The calculation is O(total observations). Example: `mathbr.hypothesis.one_way_anova([[1, 2, 3], [4, 5, 6]])`.
+
+`kruskal_wallis(groups)` takes at least two nonempty finite groups with pooled variation. It returns `ChiSquareTestResult` with statistic, `k-1` degrees of freedom, and asymptotic p-value. It sorts pooled values, assigns average ranks to ties, and applies the usual tie correction. Centered rank sums reduce cancellation. Cost is O(n log n) time and O(n) memory. Independent samples are assumed; the chi-squared approximation may be inaccurate for small groups or extensive ties. Example: `mathbr.hypothesis.kruskal_wallis([[1, 2, 2], [2, 3, 4]])`.
+
+`chi_square_independence(table)` takes a rectangular table with at least two rows and two columns, nonnegative finite counts, and positive row and column totals. It returns `ChiSquareTestResult` with Pearson statistic, `(rows-1)*(columns-1)` degrees of freedom, and asymptotic p-value. Expected counts are calculated once from row and column margins; the two table passes cost O(rows × columns) time. Small expected counts weaken the reference approximation. Example: `mathbr.hypothesis.chi_square_independence([[10, 20], [20, 10]])`.
+
+`mann_whitney_u(x, y)` compares two independent nonempty finite samples. It returns `MannWhitneyResult` with read-only `statistic` (U for the first sample), `z_score`, and two-sided `p_value`. Pooled ties receive average ranks, the normal-reference variance includes a tie correction, and the z-score uses a half-unit continuity correction. The p-value is asymptotic, so small-sample inference can be inaccurate. All-tied data raise `ValueError`. Sorting costs O(n log n) time and O(n) memory. Example: `mathbr.hypothesis.mann_whitney_u([1, 2, 3], [4, 5, 6])`.
 
 ```python
 result = mathbr.hypothesis.one_sample_t_test([1.0, 2.0, 3.0])
@@ -275,6 +360,7 @@ print(ar.forecast(2))
 ```
 
 `mathbr.statistics.weighted_quantile(x, weights, p)` returns the smallest sorted observation where cumulative positive weight reaches fraction `p` of total weight. It is a step-function quantile, with `p` in `[0,1]`. `mathbr.statistics.log_sum_exp(x)` computes the log of summed exponentials using max shifting, requiring a nonempty finite vector.
+`mathbr.statistics.empirical_mgf(x, t)` computes the sample average of `exp(t*x_i)`; `log_empirical_mgf(x, t)` computes its logarithm with max shifting. Both run in O(n), require finite nonempty data and finite `t`, and reject overflow in `t*x_i`; `empirical_mgf` also rejects a result outside finite float range. These are empirical summaries, not analytic distribution MGFs.
 
 ## Nonparametric estimation
 

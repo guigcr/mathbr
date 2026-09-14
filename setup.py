@@ -9,7 +9,7 @@ setup(
                    "src/evaluation.cpp", "src/distribution_elementary.cpp",
                    "src/diagnostics.cpp", "src/nonparametric.cpp",
                    "src/time_series_diagnostics.cpp", "src/survival.cpp",
-                   "src/bayesian.cpp"],
+                   "src/bayesian.cpp", "src/multivariate.cpp"],
         include_dirs=["include"], cxx_std=17
     )],
     cmdclass={"build_ext": build_ext},

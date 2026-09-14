@@ -18,6 +18,18 @@ std::vector<double> five_number_summary(const std::vector<double>& x);
 double covariance(const std::vector<double>& x, const std::vector<double>& y, int ddof = 1);
 double pearson_correlation(const std::vector<double>& x, const std::vector<double>& y);
 double spearman_correlation(const std::vector<double>& x, const std::vector<double>& y);
+double kendall_tau(const std::vector<double>& x, const std::vector<double>& y);
+std::vector<std::vector<double>> covariance_matrix(const std::vector<std::vector<double>>& data,
+                                                   int ddof = 1);
+std::vector<std::vector<double>> correlation_matrix(const std::vector<std::vector<double>>& data);
+std::vector<std::vector<double>> spearman_correlation_matrix(
+    const std::vector<std::vector<double>>& data);
+std::vector<std::vector<double>> kendall_correlation_matrix(
+    const std::vector<std::vector<double>>& data);
+std::vector<std::vector<double>> weighted_covariance_matrix(
+    const std::vector<std::vector<double>>& data, const std::vector<double>& weights);
+std::vector<std::vector<double>> weighted_correlation_matrix(
+    const std::vector<std::vector<double>>& data, const std::vector<double>& weights);
 double weighted_mean(const std::vector<double>& x, const std::vector<double>& weights);
 double weighted_variance(const std::vector<double>& x, const std::vector<double>& weights);
 double weighted_covariance(const std::vector<double>& x, const std::vector<double>& y,
@@ -27,5 +39,7 @@ double weighted_correlation(const std::vector<double>& x, const std::vector<doub
 double weighted_quantile(const std::vector<double>& x,
                          const std::vector<double>& weights, double p);
 double log_sum_exp(const std::vector<double>& x);
+double log_empirical_mgf(const std::vector<double>& x, double t);
+double empirical_mgf(const std::vector<double>& x, double t);
 
 }  // namespace mathbr::statistics

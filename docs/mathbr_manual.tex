@@ -1,5 +1,6 @@
 \documentclass[11pt,a4paper]{article}
 \usepackage[T1]{fontenc}
+\usepackage{amsmath}
 \usepackage[margin=25mm]{geometry}
 \usepackage{hyperref}
 \hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
@@ -78,14 +79,23 @@ percentile(x, p)              interquartile_range(x)
 five_number_summary(x)       covariance(x, y, ddof=1)
 pearson_correlation(x, y)
 spearman_correlation(x, y)
+kendall_tau(x, y)
+covariance_matrix(data, ddof=1)
+correlation_matrix(data)
+spearman_correlation_matrix(data)
+kendall_correlation_matrix(data)
+weighted_covariance_matrix(data, weights)
+weighted_correlation_matrix(data, weights)
 weighted_mean(x, weights)
 weighted_variance(x, weights)
 weighted_covariance(x, y, weights)
 weighted_correlation(x, y, weights)
 weighted_quantile(x, weights, p)
 log_sum_exp(x)
+log_empirical_mgf(x, t)
+empirical_mgf(x, t)
 \end{verbatim}
-\verb|quantile| takes \verb|p| in $[0,1]$; \verb|percentile| takes \verb|p| in $[0,100]$. Mode counts exact equal values and returns the smallest on a tie. Skewness and excess kurtosis use population central moments without small-sample correction and require positive variance. Correlations require both inputs to vary. The weighted functions require aligned, strictly positive finite weights and divide by the weight sum; weighted variance and covariance have no degrees-of-freedom correction.
+\verb|quantile| takes \verb|p| in $[0,1]$; \verb|percentile| takes \verb|p| in $[0,100]$. Mode counts exact equal values and returns the smallest on a tie. Skewness and excess kurtosis use population central moments without small-sample correction and require positive variance. Correlations require both inputs to vary. \verb|kendall_tau| returns Kendall's tau-b: $(C-D)/\sqrt{(N-T_x)(N-T_y)}$, where $C,D$ count concordant and discordant pairs, $N$ counts all pairs, and $T_x,T_y$ count ties in each coordinate. It uses sorting and a Fenwick tree in $O(n\log n)$ time and $O(n)$ memory. The weighted functions require aligned, strictly positive finite weights and divide by the weight sum; weighted variance and covariance have no degrees-of-freedom correction.
 \begin{verbatim}
 import mathbr
 s = mathbr.statistics
@@ -95,10 +105,24 @@ print(s.five_number_summary(data))
 print(s.variance(data), s.standard_deviation(data))
 print(s.weighted_mean([0.0, 2.0], [1.0, 3.0]))
 print(s.spearman_correlation([1, 2, 3], [3, 2, 1]))
+print(s.kendall_tau([1, 2, 3], [3, 2, 1]))
 print(s.weighted_quantile([0, 10, 20], [1, 2, 1], 0.5))
 print(s.log_sum_exp([1000, 1000]))
+print(s.empirical_mgf([-1, 0, 1], 0.5))
+print(s.log_empirical_mgf([1000, 1000], 1))
 \end{verbatim}
 \verb|weighted_quantile| uses the smallest observed value whose cumulative sorted weight reaches \verb|p| of the total; it is a step function, unlike the unweighted interpolated quantile. \verb|log_sum_exp| subtracts the maximum internally to avoid exponent overflow, and requires a nonempty finite vector.
+The empirical moment-generating function is $\widehat M(t)=n^{-1}\sum_i e^{t x_i}$. \verb|log_empirical_mgf| evaluates $\log\widehat M(t)$ with max shifting in $O(n)$ time; \verb|empirical_mgf| exponentiates that result and raises \verb|ValueError| if it exceeds finite floating-point range. These functions describe the supplied sample rather than a fitted probability distribution.
+For matrix functions, \verb|data| is a nonempty rectangular list of observation rows, each with at least one finite value. The returned square matrix follows the column order. \verb|covariance_matrix| uses denominator $n-\mathrm{ddof}$; \verb|correlation_matrix| uses Pearson correlation, \verb|spearman_correlation_matrix| applies average ranks to each column before Pearson correlation, and \verb|kendall_correlation_matrix| applies tau-b to each pair of columns. Correlation matrices require every column to vary. The covariance computation centers each column once, traverses only the upper triangle, and mirrors the result; its cost is $O(np^2)$ for $n$ rows and $p$ columns. Spearman additionally sorts each column in $O(pn\log n)$ time. Kendall uses $O(p^2n\log n)$ time.
+\verb|weighted_covariance_matrix| and \verb|weighted_correlation_matrix| require one positive finite weight per row with a finite total. They use population normalization by the weight sum, matching the scalar weighted functions. The implementation centers each column once, scales centered values by the square root of normalized weight, and computes only the upper triangle in $O(np^2)$ time and $O(np+p^2)$ memory.
+\begin{verbatim}
+print(s.covariance_matrix([[1, 2], [2, 4], [3, 6]]))
+print(s.correlation_matrix([[1, 2], [2, 4], [3, 6]]))
+print(s.spearman_correlation_matrix([[1, 2], [2, 4], [3, 6]]))
+print(s.kendall_correlation_matrix([[1, 2], [2, 4], [3, 6]]))
+print(s.weighted_covariance_matrix([[1, 2], [2, 4]], [1, 3]))
+print(s.weighted_correlation_matrix([[1, 2], [2, 4]], [1, 3]))
+\end{verbatim}
 These are descriptive, in-sample summaries. They do not provide hypothesis tests, missing-data handling, or uncertainty estimates.
 
 \section{Nonparametric estimation}
@@ -129,6 +153,10 @@ holm_correction(p_values)
 benjamini_hochberg_correction(p_values)
 proportion_z_test(successes, trials, null_p)
 chi_square_goodness_of_fit(observed, expected)
+one_way_anova(groups)
+kruskal_wallis(groups)
+chi_square_independence(table)
+mann_whitney_u(x, y)
 \end{verbatim}
 The paired test analyzes aligned \verb|before - after| differences. Welch's test uses separate sample variances and an approximate Satterthwaite degrees of freedom; it does not assume equal population variances. Exact one-sample and paired small-sample p-values require independent Gaussian observations or Gaussian paired differences. Welch assumes independent samples and uses an approximate reference distribution. The three correction functions return adjusted p-values in input order; Bonferroni and Holm target family-wise error, while Benjamini-Hochberg targets false discovery rate under independence or suitable positive dependence.
 \begin{verbatim}
@@ -147,8 +175,22 @@ chi = h.chi_square_goodness_of_fit([10, 20, 30],
 print(z.statistic, z.p_value)
 print(chi.statistic, chi.degrees_of_freedom,
       chi.p_value)
+anova = h.one_way_anova([[1, 2, 3], [4, 5, 6]])
+kw = h.kruskal_wallis([[1, 2, 2], [2, 3, 4]])
+print(anova.statistic, anova.df_between, anova.df_within,
+      anova.p_value)
+print(kw.statistic, kw.degrees_of_freedom, kw.p_value)
+independence = h.chi_square_independence([[10, 20], [20, 10]])
+print(independence.statistic, independence.degrees_of_freedom,
+      independence.p_value)
+mw = h.mann_whitney_u([1, 2, 3], [4, 5, 6])
+print(mw.statistic, mw.z_score, mw.p_value)
 \end{verbatim}
 The proportion test returns \verb|ZTestResult| and needs at least five expected successes and failures. The goodness-of-fit test returns \verb|ChiSquareTestResult| and uses $k-1$ degrees of freedom only when no distribution parameters were estimated from the tested counts. Small expected bin counts can make its chi-squared approximation unreliable.
+\verb|one_way_anova| takes at least two nonempty finite groups, with more total observations than groups and positive within-group variation. It returns an \verb|AnovaResult| with read-only \verb|statistic|, \verb|df_between|, \verb|df_within|, and \verb|p_value|. The F statistic is $[SS_B/(k-1)]/[SS_W/(n-k)]$ and takes $O(n)$ time. Classical p-values assume independent Gaussian observations and equal group variances.
+\verb|kruskal_wallis| accepts at least two nonempty finite groups and pooled variation. It returns a \verb|ChiSquareTestResult| with statistic, $k-1$ degrees of freedom, and asymptotic p-value. Equal values receive average ranks and a tie correction. Centered rank sums avoid subtracting two large, nearly equal terms; sorting dominates its $O(n\log n)$ cost. The chi-squared approximation may be poor with small groups or many ties.
+\verb|chi_square_independence| accepts a rectangular contingency table with at least two rows and columns, finite nonnegative counts, and positive row and column totals. It computes expected counts from the margins and returns a \verb|ChiSquareTestResult| with $(r-1)(c-1)$ degrees of freedom. Expected counts must be positive; small expected counts weaken the chi-squared approximation. It makes two $O(rc)$ passes, one for margins and one for the statistic.
+\verb|mann_whitney_u| compares two independent nonempty finite samples. It returns \verb|MannWhitneyResult| with \verb|statistic| equal to the U count for the first sample, \verb|z_score|, and two-sided \verb|p_value|. Pooled ties receive average ranks, and the normal-reference variance adjusts for ties. The z-score uses a half-unit continuity correction. This is an asymptotic p-value, not an exact small-sample test. Sorting costs $O(n\log n)$ time and $O(n)$ memory; all-tied data raise \verb|ValueError|.
 
 \section{Binary classification evaluation}
 The \verb|mathbr.evaluation| submodule accepts aligned binary labels, with 1 as the positive class. The confusion matrix has true classes in its rows and predicted classes in its columns:
@@ -276,13 +318,112 @@ print(d.uniform_ppf(0.5, -1.0, 1.0))
 \begin{verbatim}
 bernoulli_pmf(k, p)         bernoulli_cdf(k, p)
 binomial_pmf(k, n, p)      binomial_cdf(k, n, p)
+binomial_ppf(q, n, p)
 \end{verbatim}
-Binomial assumes independent trials sharing one success probability. Its CDF may require $O(n)$ work, and extreme PMFs can underflow.
+Binomial assumes independent trials sharing one success probability. Its CDF uses the regularized incomplete beta function, avoiding a sum over up to $n$ masses; the numerical iteration is bounded at 1000 steps. The PPF returns the smallest success count with CDF at least \verb|q| using $O(\log n)$ CDF evaluations. Extreme PMFs can underflow.
 \begin{verbatim}
 import mathbr
 d = mathbr.distributions
 print(d.bernoulli_pmf(1, 0.3))
 print(d.binomial_pmf(2, 4, 0.5), d.binomial_cdf(2, 4, 0.5))
+print(d.binomial_ppf(0.5, 4, 0.5))
+\end{verbatim}
+
+\subsection{Poisson}
+The Poisson distribution uses a finite nonnegative \verb|rate| and integer outcomes $k\geq0$. The PMF is $e^{-\lambda}\lambda^k/k!$; the CDF uses the regularized upper incomplete gamma function and avoids summing $k+1$ masses. For \verb|rate=0|, all mass is at zero. The PPF returns the smallest integer $k$ with CDF at least \verb|q|, using binary search; it returns infinity for \verb|q=1| when the rate is positive. PPF results beyond the supported 32-bit integer range raise \verb|ValueError|.
+\begin{verbatim}
+poisson_pmf(k, rate)      poisson_cdf(k, rate)
+poisson_ppf(q, rate)
+\end{verbatim}
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.poisson_pmf(2, 4), d.poisson_cdf(2, 4))
+print(d.poisson_ppf(0.5, 4))
+\end{verbatim}
+
+\subsection{Negative binomial and multinomial}
+The negative binomial distribution counts failures $k\geq0$ before a positive integer number of successes $r$, with independent success probability $p\in(0,1]$. Its PMF is $\binom{k+r-1}{k}p^r(1-p)^k$ and its CDF uses the regularized incomplete beta function $I_p(r,k+1)$, avoiding direct tail summation. The PPF uses an adaptive upper bound and binary search; it returns infinity at \verb|q=1| when $p<1$. Quantiles outside the supported 32-bit integer range raise \verb|ValueError|.
+\begin{verbatim}
+negative_binomial_pmf(k, successes, p)
+negative_binomial_cdf(k, successes, p)
+negative_binomial_ppf(q, successes, p)
+multinomial_pmf(counts, probabilities)
+\end{verbatim}
+The multinomial PMF uses nonnegative integer category counts and aligned nonnegative probabilities that sum to one within $10^{-12}$. A positive count in a zero-probability category has mass zero. Log-gamma coefficients avoid explicit factorials and take $O(c)$ work for $c$ categories. This API supplies a joint PMF; it does not define a multivariate CDF or quantile.
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.negative_binomial_cdf(2, 3, 0.5))
+print(d.negative_binomial_ppf(0.5, 3, 0.5))
+print(d.multinomial_pmf([1, 1, 1], [0.2, 0.3, 0.5]))
+\end{verbatim}
+\subsection{Seeded discrete sampling}
+The sampling functions below return an integer list of length \verb|count|. Each call creates a local Mersenne Twister generator from \verb|seed|, so equal seeds and parameters reproduce the same sequence with the same C++ standard-library implementation. Exact draws may differ across platforms. Geometric samples count the success trial from 1; negative-binomial samples count failures. The work is linear in output count, apart from each distribution's internal draw cost. Poisson sampling requires a rate within the integer output range.
+\begin{verbatim}
+binomial_sample(count, n, p, seed)
+geometric_sample(count, p, seed)
+poisson_sample(count, rate, seed)
+negative_binomial_sample(count, successes, p, seed)
+multinomial_sample(trials, probabilities, seed)
+bernoulli_sample(count, p, seed)
+discrete_uniform_sample(count, a, b, seed)
+\end{verbatim}
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.binomial_sample(5, 10, 0.3, seed=42))
+print(d.geometric_sample(5, 0.5, seed=42))
+print(d.poisson_sample(5, 4.0, seed=42))
+print(d.negative_binomial_sample(5, 3, 0.5, seed=42))
+print(d.multinomial_sample(10, [0.2, 0.3, 0.5], seed=42))
+print(d.bernoulli_sample(5, 0.3, seed=42))
+print(d.discrete_uniform_sample(5, -2, 2, seed=42))
+\end{verbatim}
+\verb|multinomial_sample| returns one count per category after \verb|trials| categorical draws, preparing the probabilities once. The counts sum to \verb|trials|. It accepts the same finite, nonnegative probabilities summing to one as \verb|multinomial_pmf|.
+\verb|bernoulli_sample| returns zero/one trials; \verb|discrete_uniform_sample| draws integer values from the inclusive interval \verb|[a,b]|. Both use a local seeded generator for the whole batch.
+\subsection{Seeded continuous sampling}
+Each sampler below returns a list of \verb|count| finite floats. A local Mersenne Twister generator and one standard-library distribution are initialized per call, so batch generation avoids repeated Python calls. The same seed and parameters reproduce the sequence with the same C++ implementation; exact streams may differ across platforms. Invalid or nonfinite parameters raise \verb|ValueError|. A nonfinite generated value raises \verb|OverflowError|. The output work is $O(\texttt{count})$, with distribution-specific draw cost.
+\begin{verbatim}
+normal_sample(count, seed)
+student_t_sample(count, df, seed)
+chi_square_sample(count, df, seed)
+f_sample(count, df1, df2, seed)
+uniform_sample(count, a, b, seed)
+exponential_sample(count, rate, seed)
+gamma_sample(count, shape, scale, seed)
+weibull_sample(count, shape, scale, seed)
+cauchy_sample(count, location, scale, seed)
+lognormal_sample(count, mu, sigma, seed)
+laplace_sample(count, location, scale, seed)
+beta_sample(count, alpha, beta, seed)
+\end{verbatim}
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.normal_sample(5, seed=42))
+print(d.gamma_sample(5, shape=2, scale=3, seed=42))
+print(d.lognormal_sample(5, mu=0, sigma=1, seed=42))
+print(d.laplace_sample(5, location=0, scale=1, seed=42))
+print(d.beta_sample(5, alpha=2, beta=3, seed=42))
+\end{verbatim}
+\verb|laplace_sample| uses a random sign and exponential magnitude. \verb|beta_sample| forms a ratio of independent gamma variates after scaling them by their maximum, avoiding overflow in their sum. Extreme beta shapes can cause both gamma variates to underflow to zero; this raises \verb|OverflowError|.
+
+\subsection{Geometric and discrete uniform}
+The geometric distribution counts the trial on which the first success occurs, so its support is $1,2,\ldots$ and its success probability must lie in $(0,1]$. Its PMF is $p(1-p)^{k-1}$, and its CDF is $1-(1-p)^k$. The discrete uniform distribution has inclusive integer support from \verb|a| through \verb|b|, with \verb|a <= b|. Its PMF is $1/(b-a+1)$. All quantiles return the smallest supported integer with CDF at least \verb|q|, where \verb|q| lies in $[0,1]$. The geometric PPF returns infinity at \verb|q=1| unless \verb|p=1|. PMF and CDF are constant-time formulas; the geometric PPF uses logarithms plus a boundary correction.
+\begin{verbatim}
+geometric_pmf(k, p)       geometric_cdf(k, p)
+geometric_ppf(q, p)
+discrete_uniform_pmf(k, a, b)
+discrete_uniform_cdf(k, a, b)
+discrete_uniform_ppf(q, a, b)
+\end{verbatim}
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.geometric_pmf(3, 0.25), d.geometric_ppf(0.5, 0.25))
+print(d.discrete_uniform_cdf(2, 1, 3))
+print(d.discrete_uniform_ppf(0.5, 1, 3))
 \end{verbatim}
 
 \subsection{Exponential, Weibull, Laplace, Cauchy, and log-normal}
@@ -326,6 +467,64 @@ print(d.gamma_cdf(1.0, shape=1.0, scale=2.0))
 print(d.gamma_ppf(0.5, shape=2.0, scale=3.0))
 print(d.beta_pdf(0.5, alpha=2.0, beta=2.0))
 print(d.beta_ppf(0.95, alpha=2.0, beta=5.0))
+\end{verbatim}
+
+\subsection{Pareto and Dirichlet}
+Pareto type I has positive \verb|shape| and lower support bound \verb|scale|. Its density is $\alpha x_m^\alpha/x^{\alpha+1}$ for $x\geq x_m$. The CDF and PPF use logarithmic forms; the PPF returns the lower bound at zero and infinity at one. Seeded sampling draws an exponential log-ratio for each result and raises \verb|OverflowError| if a sampled value is not finite.
+\begin{verbatim}
+pareto_pdf(x, shape, scale)  pareto_cdf(x, shape, scale)
+pareto_ppf(p, shape, scale)
+pareto_sample(count, shape, scale, seed)
+\end{verbatim}
+The Dirichlet density is defined here only on the interior of the simplex: every component of \verb|x| and \verb|alpha| must be finite and positive, both vectors must have the same length of at least two, and \verb|x| must sum to one within $10^{-12}$. The log-density uses log-gamma terms in $O(c)$ work for $c$ categories. Seeded sampling draws independent gamma values, scales by their maximum, and normalizes each row. This avoids overflow in the sum; extreme gamma underflow or overflow raises \verb|OverflowError|.
+\begin{verbatim}
+dirichlet_logpdf(x, alpha)  dirichlet_pdf(x, alpha)
+dirichlet_sample(count, alpha, seed)
+\end{verbatim}
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.pareto_cdf(2, shape=2, scale=1))
+print(d.pareto_sample(5, shape=3, scale=1, seed=42))
+print(d.dirichlet_pdf([0.2, 0.3, 0.5], [1, 1, 1]))
+print(d.dirichlet_sample(3, [2, 3, 5], seed=42))
+\end{verbatim}
+
+\subsection{Closed-form distribution fitting}
+Three maximum-likelihood fits require one pass over the sample and constant auxiliary memory. \verb|normal_fit| returns \verb|[mean, sigma]| with $\hat\sigma^2=n^{-1}\sum_i(x_i-\bar x)^2$; the data must be finite and varying. \verb|exponential_fit| returns rate $1/\bar x$ for nonnegative observations with positive mean. \verb|poisson_fit| returns the mean nonnegative integer count, including zero when all counts are zero. Invalid samples raise \verb|ValueError|. These fits do not return uncertainty estimates.
+\begin{verbatim}
+normal_fit(observations)
+exponential_fit(observations)
+poisson_fit(observations)
+\end{verbatim}
+\begin{verbatim}
+import mathbr
+d = mathbr.distributions
+print(d.normal_fit([1, 2, 3, 4]))
+print(d.exponential_fit([0, 1, 2, 3]))
+print(d.poisson_fit([0, 1, 2, 3]))
+\end{verbatim}
+
+\subsection{Multivariate normal and Mahalanobis distance}
+\verb|MultivariateNormal(mean, covariance)| accepts a finite mean vector and a matching finite, symmetric positive-definite covariance matrix. Construction computes a Cholesky factor once in $O(p^3)$ time for $p$ dimensions. Density, log-density, and Mahalanobis distance use triangular solves in $O(p^2)$ time per observation, avoiding an explicit inverse. Batch methods reuse the factor and a work vector. \verb|sample(count, seed)| returns row-major draws using the cached factor and a local seeded generator. Nonfinite generated values raise \verb|OverflowError|; invalid shapes or covariance raise \verb|ValueError|.
+\begin{verbatim}
+MultivariateNormal(mean, covariance)
+logpdf(x)                 pdf(x)
+mahalanobis_distance(x)
+logpdf_batch(data)        pdf_batch(data)
+sample(count, seed)
+mathbr.statistics.mahalanobis_distance(x, mean, covariance)
+\end{verbatim}
+The scalar statistics convenience function factors the covariance on every call. Reuse a \verb|MultivariateNormal| object for repeated evaluations. The log-density is $-\frac{p}{2}\log(2\pi)-\frac12\log|\Sigma|-\frac12(x-\mu)^T\Sigma^{-1}(x-\mu)$, evaluated through the Cholesky factor.
+\begin{verbatim}
+import mathbr
+m = mathbr.distributions.MultivariateNormal(
+    [0, 0], [[1, 0.5], [0.5, 2]])
+print(m.logpdf([1, 2]), m.mahalanobis_distance([1, 2]))
+print(m.logpdf_batch([[0, 0], [1, 2]]))
+print(m.sample(3, seed=42))
+print(mathbr.statistics.mahalanobis_distance(
+    [1, 2], [0, 0], [[1, 0.5], [0.5, 2]]))
 \end{verbatim}
 
 \section{Gradient-descent models}

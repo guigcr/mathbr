@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <limits>
 #include <stdexcept>
 
 namespace mathbr::statistics {
@@ -51,6 +52,90 @@ std::vector<double> average_ranks(const std::vector<double>& x) {
         i = j;
     }
     return ranks;
+}
+
+void validate_matrix(const std::vector<std::vector<double>>& data) {
+    if (data.empty() || data.front().empty())
+        throw std::invalid_argument("data matrix must have rows and columns");
+    const size_t columns = data.front().size();
+    for (const auto& row : data) {
+        if (row.size() != columns) throw std::invalid_argument("data matrix must be rectangular");
+        for (double value : row)
+            if (!std::isfinite(value)) throw std::invalid_argument("data matrix must be finite");
+    }
+}
+
+std::vector<std::vector<double>> matrix_covariance(
+    const std::vector<std::vector<double>>& data, int ddof) {
+    validate_matrix(data);
+    const size_t n = data.size(), p = data.front().size();
+    if (ddof < 0 || static_cast<size_t>(ddof) >= n)
+        throw std::invalid_argument("ddof must be nonnegative and less than row count");
+    std::vector<std::vector<double>> columns(p, std::vector<double>(n));
+    std::vector<double> means(p, 0.0);
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < p; ++j) means[j] += data[i][j];
+    for (double& value : means) value /= n;
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < p; ++j) columns[j][i] = data[i][j] - means[j];
+    std::vector<std::vector<double>> result(p, std::vector<double>(p));
+    for (size_t j = 0; j < p; ++j) {
+        for (size_t k = j; k < p; ++k) {
+            double sum = 0.0;
+            for (size_t i = 0; i < n; ++i) sum += columns[j][i] * columns[k][i];
+            result[j][k] = result[k][j] = sum / (n - ddof);
+        }
+    }
+    return result;
+}
+
+std::vector<std::vector<double>> matrix_weighted_covariance(
+    const std::vector<std::vector<double>>& data, const std::vector<double>& weights) {
+    validate_matrix(data);
+    const size_t n = data.size(), p = data.front().size();
+    if (weights.size() != n) throw std::invalid_argument("weight count must match row count");
+    double total = 0.0;
+    for (double weight : weights) {
+        if (!std::isfinite(weight) || weight <= 0.0)
+            throw std::invalid_argument("weights must be positive and finite");
+        total += weight;
+    }
+    if (!std::isfinite(total)) throw std::invalid_argument("weight sum must be finite");
+    std::vector<double> means(p, 0.0);
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < p; ++j)
+            means[j] += (weights[i] / total) * (data[i][j] - data[0][j]);
+    for (size_t j = 0; j < p; ++j) means[j] += data[0][j];
+    std::vector<std::vector<double>> columns(p, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i) {
+        const double scale = std::sqrt(weights[i] / total);
+        for (size_t j = 0; j < p; ++j)
+            columns[j][i] = scale * (data[i][j] - means[j]);
+    }
+    std::vector<std::vector<double>> result(p, std::vector<double>(p));
+    for (size_t j = 0; j < p; ++j)
+        for (size_t k = j; k < p; ++k) {
+            double sum = 0.0;
+            for (size_t i = 0; i < n; ++i) sum += columns[j][i] * columns[k][i];
+            result[j][k] = result[k][j] = sum;
+        }
+    return result;
+}
+
+std::vector<std::vector<double>> normalize_covariance(std::vector<std::vector<double>> result) {
+    const size_t p = result.size();
+    std::vector<double> scales(p);
+    for (size_t j = 0; j < p; ++j) {
+        if (!(result[j][j] > 0.0))
+            throw std::invalid_argument("correlation matrix requires varying columns");
+        scales[j] = std::sqrt(result[j][j]);
+    }
+    for (size_t j = 0; j < p; ++j) {
+        result[j][j] = 1.0;
+        for (size_t k = j + 1; k < p; ++k)
+            result[j][k] = result[k][j] = result[j][k] / (scales[j] * scales[k]);
+    }
+    return result;
 }
 }  // namespace
 
@@ -173,6 +258,109 @@ double spearman_correlation(const std::vector<double>& x, const std::vector<doub
     return pearson_correlation(average_ranks(x), average_ranks(y));
 }
 
+double kendall_tau(const std::vector<double>& x, const std::vector<double>& y) {
+    validate_pair(x, y);
+    const size_t n = x.size();
+    std::vector<std::pair<double, double>> pairs(n);
+    for (size_t i = 0; i < n; ++i) pairs[i] = {x[i], y[i]};
+    std::sort(pairs.begin(), pairs.end());
+
+    std::vector<double> levels = y;
+    std::sort(levels.begin(), levels.end());
+    levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
+    std::vector<size_t> tree(levels.size() + 1, 0);
+    auto prefix = [&](size_t end) {
+        size_t count = 0;
+        for (; end > 0; end -= end & (~end + 1)) count += tree[end];
+        return count;
+    };
+    auto add = [&](size_t index) {
+        for (++index; index < tree.size(); index += index & (~index + 1)) ++tree[index];
+    };
+
+    long double concordant = 0, discordant = 0, x_ties = 0;
+    for (size_t i = 0; i < n;) {
+        size_t j = i + 1;
+        while (j < n && pairs[j].first == pairs[i].first) ++j;
+        const long double group = static_cast<long double>(j - i);
+        x_ties += group * (group - 1) / 2;
+        for (size_t k = i; k < j; ++k) {
+            const size_t rank = std::lower_bound(levels.begin(), levels.end(), pairs[k].second)
+                                - levels.begin();
+            concordant += prefix(rank);
+            discordant += i - prefix(rank + 1);
+        }
+        for (size_t k = i; k < j; ++k) {
+            const size_t rank = std::lower_bound(levels.begin(), levels.end(), pairs[k].second)
+                                - levels.begin();
+            add(rank);
+        }
+        i = j;
+    }
+    long double y_ties = 0;
+    for (size_t i = 0; i < levels.size(); ++i) {
+        const long double count = static_cast<long double>(prefix(i + 1) - prefix(i));
+        y_ties += count * (count - 1) / 2;
+    }
+    const long double total = static_cast<long double>(n) * (n - 1) / 2;
+    const long double denominator = std::sqrt((total - x_ties) * (total - y_ties));
+    if (denominator == 0) throw std::invalid_argument("Kendall tau requires varying data");
+    return static_cast<double>((concordant - discordant) / denominator);
+}
+
+std::vector<std::vector<double>> covariance_matrix(
+    const std::vector<std::vector<double>>& data, int ddof) {
+    return matrix_covariance(data, ddof);
+}
+
+std::vector<std::vector<double>> correlation_matrix(
+    const std::vector<std::vector<double>>& data) {
+    return normalize_covariance(matrix_covariance(data, 0));
+}
+
+std::vector<std::vector<double>> spearman_correlation_matrix(
+    const std::vector<std::vector<double>>& data) {
+    validate_matrix(data);
+    const size_t n = data.size(), p = data.front().size();
+    std::vector<std::vector<double>> ranked(n, std::vector<double>(p));
+    for (size_t j = 0; j < p; ++j) {
+        std::vector<double> column(n);
+        for (size_t i = 0; i < n; ++i) column[i] = data[i][j];
+        auto ranks = average_ranks(column);
+        for (size_t i = 0; i < n; ++i) ranked[i][j] = ranks[i];
+    }
+    return normalize_covariance(matrix_covariance(ranked, 0));
+}
+
+std::vector<std::vector<double>> kendall_correlation_matrix(
+    const std::vector<std::vector<double>>& data) {
+    validate_matrix(data);
+    const size_t n = data.size(), p = data.front().size();
+    std::vector<std::vector<double>> columns(p, std::vector<double>(n));
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < p; ++j) columns[j][i] = data[i][j];
+    std::vector<std::vector<double>> result(p, std::vector<double>(p, 1.0));
+    for (size_t j = 0; j < p; ++j) {
+        // Validate diagonal as a varying column, even for a single-column matrix.
+        if (*std::min_element(columns[j].begin(), columns[j].end()) ==
+            *std::max_element(columns[j].begin(), columns[j].end()))
+            throw std::invalid_argument("correlation matrix requires varying columns");
+        for (size_t k = j + 1; k < p; ++k)
+            result[j][k] = result[k][j] = kendall_tau(columns[j], columns[k]);
+    }
+    return result;
+}
+
+std::vector<std::vector<double>> weighted_covariance_matrix(
+    const std::vector<std::vector<double>>& data, const std::vector<double>& weights) {
+    return matrix_weighted_covariance(data, weights);
+}
+
+std::vector<std::vector<double>> weighted_correlation_matrix(
+    const std::vector<std::vector<double>>& data, const std::vector<double>& weights) {
+    return normalize_covariance(matrix_weighted_covariance(data, weights));
+}
+
 double weighted_mean(const std::vector<double>& x, const std::vector<double>& weights) {
     const double total = weight_sum(x, weights);
     double sum = 0.0;
@@ -225,6 +413,28 @@ double log_sum_exp(const std::vector<double>& x) {
     double sum = 0;
     for (double value : x) sum += std::exp(value - maximum);
     return maximum + std::log(sum);
+}
+
+double log_empirical_mgf(const std::vector<double>& x, double t) {
+    validate(x);
+    if (!std::isfinite(t)) throw std::invalid_argument("t must be finite");
+    if (t == 0.0) return 0.0;
+    double maximum = -std::numeric_limits<double>::infinity();
+    for (double value : x) {
+        const double product = t * value;
+        if (!std::isfinite(product))
+            throw std::invalid_argument("t times data must be finite");
+        maximum = std::max(maximum, product);
+    }
+    double sum = 0.0;
+    for (double value : x) sum += std::exp(t * value - maximum);
+    return maximum + std::log(sum / x.size());
+}
+
+double empirical_mgf(const std::vector<double>& x, double t) {
+    const double result = std::exp(log_empirical_mgf(x, t));
+    if (!std::isfinite(result)) throw std::invalid_argument("MGF exceeds finite range");
+    return result;
 }
 
 }  // namespace mathbr::statistics
